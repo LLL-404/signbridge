@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { VoiceInput } from '@/components/voice/VoiceInput';
 import { SignCamera } from '@/components/sign/SignCamera';
-import Avatar3D from '@/components/avatar/Avatar3D';
+import AvatarCanvas from '@/components/avatar/AvatarCanvas';
 import { grammarEngine } from '@/modules/grammar/GrammarEngine';
 import { AvatarDriver } from '@/modules/avatar/AvatarDriver';
 import { KeypointExtractor } from '@/modules/recognition/KeypointExtractor';
@@ -293,7 +293,7 @@ export function DialoguePage() {
           </div>
           <VoiceInput onText={handleVoiceText} placeholder="点击麦克风说话，将转为手语" />
           <div className="flex items-start justify-center">
-            <Avatar3D pose={currentPose} width={360} height={420} />
+            <AvatarCanvas pose={currentPose} width={360} height={420} />
           </div>
         </div>
 

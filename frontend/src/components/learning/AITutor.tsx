@@ -1,7 +1,7 @@
 // AI 陪练模式组件
 // 系统出题 → 用户打手语 → 识别评分 → 动态调整难度
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Avatar3D from '@/components/avatar/Avatar3D';
+import AvatarCanvas from '@/components/avatar/AvatarCanvas';
 import { ScoreFeedback } from './ScoreFeedback';
 import { useAvatarPlayer } from '@/hooks/useAvatarPlayer';
 import { useHandTracking } from '@/hooks/useHandTracking';
@@ -246,7 +246,7 @@ export function AITutor({ initialDifficulty = 1 }: AITutorProps) {
             )}
           </div>
 
-          <Avatar3D pose={pose} width={400} height={400} />
+          <AvatarCanvas pose={pose} width={400} height={400} />
 
           {phase === 'prompt' && (
             <div className="flex gap-3">

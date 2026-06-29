@@ -1,7 +1,7 @@
 // 词汇查询组件
 // 提供搜索框、分类标签、词汇卡片网格，点击词汇后由虚拟人演示标准动作
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Avatar3D from '@/components/avatar/Avatar3D';
+import AvatarCanvas from '@/components/avatar/AvatarCanvas';
 import { useAvatarPlayer } from '@/hooks/useAvatarPlayer';
 import { vocabularyStore } from '@/modules/data/VocabularyStore';
 import type { SignGloss } from '@/types/sign';
@@ -146,7 +146,7 @@ export function WordSearch({ onSelectWord }: WordSearchProps) {
         <div className="text-sm font-medium text-gray-600">
           {selectedGloss ? `演示：${selectedGloss.chinese}` : '请选择词汇查看演示'}
         </div>
-        <Avatar3D pose={pose} width={400} height={500} />
+        <AvatarCanvas pose={pose} width={400} height={500} />
         {isPlaying && (
           <div className="text-sm text-brand-start">▶ 正在播放动作...</div>
         )}

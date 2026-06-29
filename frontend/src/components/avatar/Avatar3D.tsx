@@ -1,5 +1,5 @@
 // 3D 虚拟人 React 组件
-import { useRef, useMemo, useEffect, Suspense } from 'react';
+import { useRef, useMemo, useEffect, Suspense, type CSSProperties } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -15,9 +15,13 @@ export interface Avatar3DProps {
   /** 当前姿态 */
   pose?: BonePose;
   /** 画布宽度 */
-  width?: number;
+  width?: number | string;
   /** 画布高度 */
-  height?: number;
+  height?: number | string;
+  /** 容器额外内联样式 */
+  containerStyle?: CSSProperties;
+  /** 自定义类名 */
+  className?: string;
   /**
    * 渲染模式：
    *   'skeleton' — 骨架模式（代码生成几何体，轻量，无外部依赖）
@@ -87,16 +91,20 @@ export default function Avatar3D({
   pose,
   width = 400,
   height = 500,
+  containerStyle,
+  className,
   mode = 'skeleton',
   modelUrl = '/models/avatar.vrm',
   onVRMLoaded,
 }: Avatar3DProps) {
   const currentPose = pose ?? NEUTRAL_POSE;
 
+  const mergedStyle: CSSProperties = { width, height, ...containerStyle };
+
   return (
     <div
-      style={{ width, height }}
-      className="rounded-2xl overflow-hidden bg-gradient-to-b from-dark-900 to-dark-950"
+      style={mergedStyle}
+      className={`rounded-2xl overflow-hidden bg-gradient-to-b from-dark-900 to-dark-950 ${className ?? ''}`}
     >
       <Canvas
         shadows

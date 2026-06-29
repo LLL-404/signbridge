@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Avatar3D from '@/components/avatar/Avatar3D';
+import AvatarCanvas from '@/components/avatar/AvatarCanvas';
 import { useAvatarPlayer } from '@/hooks/useAvatarPlayer';
 import { grammarEngine } from '@/modules/grammar/GrammarEngine';
 import {
@@ -166,7 +166,7 @@ export function DemoMode() {
             {/* 虚拟人演示区 */}
             <div className="flex-1">
               <div className="bg-dark-900 rounded-xl overflow-hidden aspect-video relative">
-                <Avatar3D pose={pose} />
+                <AvatarCanvas pose={pose} width="100%" height="100%" className="!rounded-none" />
                 {!displayedText && (
                   <div className="absolute inset-0 flex items-center justify-center text-content-muted">
                     选择场景并开始演示

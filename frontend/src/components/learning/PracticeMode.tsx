@@ -1,7 +1,7 @@
 // 跟练模式组件
 // 流程：选词 → 虚拟人演示 → 用户模仿 → 摄像头捕捉 → DTW 评分 → 反馈
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Avatar3D from '@/components/avatar/Avatar3D';
+import AvatarCanvas from '@/components/avatar/AvatarCanvas';
 import { ScoreFeedback } from './ScoreFeedback';
 import { useAvatarPlayer } from '@/hooks/useAvatarPlayer';
 import { useHandTracking } from '@/hooks/useHandTracking';
@@ -161,7 +161,7 @@ export function PracticeMode({ initialGloss }: PracticeModeProps) {
           )}
         </div>
 
-        <Avatar3D pose={pose} width={400} height={400} />
+        <AvatarCanvas pose={pose} width={400} height={400} />
 
         {phase === 'demo' && (
           <div className="flex flex-col items-center gap-2">
