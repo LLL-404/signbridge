@@ -1,0 +1,215 @@
+{
+  "version": "1.0.0",
+  "description": "SignBridge 默认手势库（基于 MediaPipe 21 关键点几何规则）",
+  "gestures": [
+    {
+      "id": "csl_0",
+      "chinese": "数字 0",
+      "emoji": "0️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["any", "fold", "fold", "fold", "fold"],
+        "thumb_index_dist_max": 0.5
+      }
+    },
+    {
+      "id": "csl_1",
+      "chinese": "数字 1",
+      "emoji": "1️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["!ext", "ext", "fold", "fold", "fold"]
+      }
+    },
+    {
+      "id": "csl_2",
+      "chinese": "数字 2",
+      "emoji": "2️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["!ext", "ext", "ext", "fold", "fold"]
+      }
+    },
+    {
+      "id": "csl_3",
+      "chinese": "数字 3",
+      "emoji": "3️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["!ext", "ext", "ext", "ext", "fold"]
+      }
+    },
+    {
+      "id": "csl_4",
+      "chinese": "数字 4",
+      "emoji": "4️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["!ext", "ext", "ext", "ext", "ext"]
+      }
+    },
+    {
+      "id": "csl_5",
+      "chinese": "数字 5",
+      "emoji": "5️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["ext", "ext", "ext", "ext", "ext"]
+      }
+    },
+    {
+      "id": "csl_6",
+      "chinese": "数字 6",
+      "emoji": "6️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["ext", "fold", "fold", "fold", "ext"]
+      }
+    },
+    {
+      "id": "csl_7",
+      "chinese": "数字 7",
+      "emoji": "7️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["ext", "ext", "fold", "fold", "fold"]
+      }
+    },
+    {
+      "id": "csl_8",
+      "chinese": "数字 8",
+      "emoji": "8️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["ext", "ext", "ext", "fold", "fold"]
+      }
+    },
+    {
+      "id": "csl_9",
+      "chinese": "数字 9",
+      "emoji": "9️⃣",
+      "category": "digit",
+      "rule": {
+        "fingers": ["ext", "ext", "ext", "ext", "fold"]
+      }
+    },
+    {
+      "id": "fist",
+      "chinese": "握拳",
+      "emoji": "✊",
+      "category": "common",
+      "rule": {
+        "fingers": ["!ext", "fold", "fold", "fold", "fold"]
+      }
+    },
+    {
+      "id": "open_palm",
+      "chinese": "张开手掌",
+      "emoji": "🖐",
+      "category": "common",
+      "rule": {
+        "fingers": ["!ext", "ext", "ext", "ext", "ext"]
+      }
+    },
+    {
+      "id": "thumbs_up",
+      "chinese": "点赞",
+      "emoji": "👍",
+      "category": "common",
+      "rule": {
+        "fingers": ["ext", "fold", "fold", "fold", "fold"]
+      }
+    },
+    {
+      "id": "victory",
+      "chinese": "胜利",
+      "emoji": "✌️",
+      "category": "common",
+      "rule": {
+        "fingers": ["!ext", "ext", "ext", "fold", "fold"]
+      }
+    },
+    {
+      "id": "point_up",
+      "chinese": "食指上指",
+      "emoji": "☝️",
+      "category": "common",
+      "rule": {
+        "fingers": ["!ext", "ext", "fold", "fold", "fold"]
+      }
+    },
+    {
+      "id": "iloveyou",
+      "chinese": "我爱你",
+      "emoji": "🤟",
+      "category": "common",
+      "rule": {
+        "fingers": ["ext", "ext", "fold", "fold", "ext"]
+      }
+    },
+    {
+      "id": "rock",
+      "chinese": "石头",
+      "emoji": "✊",
+      "category": "rps",
+      "rule": {
+        "fingers": ["any", "fold", "fold", "fold", "fold"]
+      }
+    },
+    {
+      "id": "scissors",
+      "chinese": "剪刀",
+      "emoji": "✌️",
+      "category": "rps",
+      "rule": {
+        "fingers": ["any", "ext", "ext", "fold", "fold"]
+      }
+    },
+    {
+      "id": "paper",
+      "chinese": "布",
+      "emoji": "✋",
+      "category": "rps",
+      "rule": {
+        "fingers": ["any", "ext", "ext", "ext", "ext"]
+      }
+    },
+    {
+      "id": "ok",
+      "chinese": "OK",
+      "emoji": "👌",
+      "category": "common",
+      "rule": {
+        "fingers": ["any", "any", "ext", "ext", "ext"],
+        "thumb_index_dist_max": 0.4
+      }
+    },
+    {
+      "id": "call",
+      "chinese": "打电话",
+      "emoji": "🤙",
+      "category": "common",
+      "rule": {
+        "fingers": ["ext", "fold", "fold", "fold", "ext"]
+      }
+    },
+    {
+      "id": "three_sign",
+      "chinese": "三",
+      "emoji": "🤟",
+      "category": "common",
+      "rule": {
+        "fingers": ["ext", "ext", "ext", "ext", "fold"]
+      }
+    },
+    {
+      "id": "gun",
+      "chinese": "手枪",
+      "emoji": "🔫",
+      "category": "common",
+      "rule": {
+        "fingers": ["ext", "ext", "fold", "fold", "fold"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+# SignBridge CI —— 类型检查 + 依赖架构校验 + 单元测试 + 构建
+# 在 PR 和 push 到 master 时自动运行
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npx tsc --noEmit -p tsconfig.app.json
+
+      - name: 依赖架构校验
+        run: npm run deps:check
+
+      - name: 单元测试
+        run: npm run test
+
+      - name: 构建
+        run: npm run build

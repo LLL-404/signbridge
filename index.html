@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手语桥 SignBridge - AI手语翻译官创意提案</title>
+
+    <!-- 现代字体：Inter（无衬线）+ JetBrains Mono（等宽） -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* ===== 基础重置 ===== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-base: #0a0a0f;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --text-primary: #e8edf6;
+            --text-secondary: #9aa7bd;
+            --text-muted: #6b7892;
+            --card-bg: rgba(255, 255, 255, 0.04);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --card-border-hover: rgba(59, 130, 246, 0.35);
+            --highlight-bg: rgba(59, 130, 246, 0.08);
+            --highlight-border: rgba(59, 130, 246, 0.4);
+            --feature-bg: rgba(255, 255, 255, 0.03);
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.7;
+            overflow-x: hidden;
+            background-color: var(--bg-base);
+            /* 双 radial-gradient 蓝色/青色微光 */
+            background-image:
+                radial-gradient(circle at 15% 20%, rgba(59, 130, 246, 0.18) 0%, transparent 45%),
+                radial-gradient(circle at 85% 80%, rgba(6, 182, 212, 0.14) 0%, transparent 45%);
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+        }
+
+        /* ===== 容器 ===== */
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 60px 24px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ===== 入场动画 ===== */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-40px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+        }
+        @keyframes glowPulse {
+            0%, 100% { text-shadow: 0 0 20px rgba(59, 130, 246, 0.35); }
+            50%      { text-shadow: 0 0 36px rgba(59, 130, 246, 0.6); }
+        }
+
+        /* ===== 头部 ===== */
+        .header {
+            text-align: center;
+            margin-bottom: 56px;
+            animation: fadeInUp 0.8s ease both;
+        }
+        .header h1 {
+            font-size: 52px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            margin-bottom: 14px;
+            background: linear-gradient(135deg, #ffffff 0%, #3b82f6 55%, #06b6d4 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: glowPulse 4s ease-in-out infinite;
+        }
+        .header .subtitle {
+            font-size: 20px;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+        .header .badge {
+            display: inline-block;
+            margin-top: 18px;
+            padding: 6px 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+            color: var(--accent-cyan);
+            background: rgba(6, 182, 212, 0.08);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 999px;
+        }
+
+        /* ===== 卡片（玻璃拟态） ===== */
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(20px) saturate(140%);
+            -webkit-backdrop-filter: blur(20px) saturate(140%);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 36px;
+            margin-bottom: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+            transition: border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+            animation: fadeInUp 0.8s ease both;
+        }
+        .card:hover {
+            border-color: var(--card-border-hover);
+            transform: translateY(-3px);
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(59, 130, 246, 0.1);
+        }
+        /* 卡片交错入场 */
+        .card:nth-child(2) { animation-delay: 0.1s; }
+        .card:nth-child(3) { animation-delay: 0.2s; }
+        .card:nth-child(4) { animation-delay: 0.3s; }
+        .card:nth-child(5) { animation-delay: 0.4s; }
+        .card:nth-child(6) { animation-delay: 0.5s; }
+        .card:nth-child(7) { animation-delay: 0.6s; }
+        .card:nth-child(8) { animation-delay: 0.7s; }
+
+        .card h2 {
+            font-size: 26px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-primary);
+        }
+        .card h2 .icon {
+            font-size: 30px;
+            filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.4));
+        }
+        .card p, .card li {
+            line-height: 1.85;
+            color: var(--text-secondary);
+            font-size: 16px;
+        }
+        .card strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        .card ul {
+            padding-left: 24px;
+            margin-top: 14px;
+        }
+        .card li {
+            margin-bottom: 10px;
+        }
+        .card li::marker {
+            color: var(--accent-blue);
+        }
+
+        /* ===== 高亮框 ===== */
+        .highlight-box {
+            background: var(--highlight-bg);
+            border-left: 4px solid var(--highlight-border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 22px 0;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+        .highlight-box p { color: var(--text-primary); }
+
+        /* ===== 功能网格 ===== */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-top: 24px;
+        }
+        .feature-item {
+            background: var(--feature-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 26px 20px;
+            text-align: center;
+            transition: transform 0.3s ease, border-color 0.3s ease, background 0.3s ease;
+            animation: slideInLeft 0.7s ease both;
+        }
+        .feature-item:nth-child(1) { animation-delay: 0.35s; }
+        .feature-item:nth-child(2) { animation-delay: 0.45s; }
+        .feature-item:nth-child(3) { animation-delay: 0.55s; }
+        .feature-item:nth-child(4) { animation-delay: 0.65s; }
+        .feature-item:hover {
+            transform: translateY(-4px);
+            border-color: var(--card-border-hover);
+            background: rgba(59, 130, 246, 0.06);
+        }
+        .feature-item .emoji {
+            font-size: 42px;
+            margin-bottom: 12px;
+            filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.35));
+        }
+        .feature-item h3 {
+            color: var(--accent-blue);
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .feature-item p {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        /* ===== 技术栈标签 ===== */
+        .tech-stack {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 18px;
+        }
+        .tech-tag {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            color: #d6e4ff;
+            padding: 7px 16px;
+            border-radius: 999px;
+            background: rgba(59, 130, 246, 0.12);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            transition: all 0.25s ease;
+        }
+        .tech-tag:hover {
+            background: rgba(59, 130, 246, 0.22);
+            border-color: rgba(59, 130, 246, 0.6);
+            transform: translateY(-2px);
+        }
+
+        /* ===== 数据统计 ===== */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .stat-item {
+            text-align: center;
+            padding: 20px 12px;
+            background: var(--feature-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            transition: border-color 0.3s ease;
+        }
+        .stat-item:hover { border-color: var(--card-border-hover); }
+        .stat-number {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 34px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-top: 6px;
+        }
+
+        /* ===== 演示区 ===== */
+        .demo-section { text-align: center; }
+        .demo-section p { color: var(--text-secondary); }
+        .demo-btn {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 16px 44px;
+            font-size: 17px;
+            font-weight: 600;
+            font-family: 'Inter', sans-serif;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 28px rgba(59, 130, 246, 0.4);
+            transition: transform 0.25s ease, box-shadow 0.25s ease;
+            cursor: pointer;
+        }
+        .demo-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 36px rgba(59, 130, 246, 0.55);
+        }
+
+        /* ===== 页脚 ===== */
+        .footer {
+            text-align: center;
+            margin-top: 48px;
+            padding: 28px 20px;
+            color: var(--text-muted);
+            animation: fadeIn 1s ease 0.9s both;
+        }
+        .footer p:first-child {
+            color: var(--text-secondary);
+            font-size: 16px;
+            font-style: italic;
+        }
+        .footer p:last-child {
+            margin-top: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+            color: var(--accent-cyan);
+        }
+
+        /* ===== 响应式 ===== */
+        @media (max-width: 768px) {
+            .container { padding: 40px 16px; }
+            .header h1 { font-size: 36px; }
+            .header .subtitle { font-size: 16px; }
+            .card { padding: 24px 20px; border-radius: 16px; }
+            .card h2 { font-size: 21px; }
+            .feature-grid { grid-template-columns: 1fr; }
+            .stats { grid-template-columns: 1fr; }
+            .stat-number { font-size: 28px; }
+            .demo-btn { padding: 14px 32px; font-size: 16px; }
+        }
+        @media (max-width: 380px) {
+            .header h1 { font-size: 30px; }
+            .card { padding: 20px 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>手语桥 SignBridge</h1>
+            <p class="subtitle">AI手语翻译官 — 让沟通跨越声音的边界</p>
+            <span class="badge">// Creative Proposal</span>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">💡</span>创意介绍</h2>
+            <p>在中国，超过<strong>2700万</strong>听障人士以手语作为母语。他们生活在无声的世界里，与有声世界之间隔着一道看不见的墙。</p>
+            <div class="highlight-box">
+                <p><strong>手语桥 SignBridge</strong> 是一个AI驱动的双向手语翻译系统，让听障人士与健听人之间的沟通变得像面对面交谈一样自然。</p>
+            </div>
+            <p>我们不只是做"文字翻译工具"，而是打造一个<strong>有温度的虚拟人手语表达系统</strong>：</p>
+            <ul>
+                <li>健听人说话 → 3D虚拟人实时打手语</li>
+                <li>听障人士打手语 → 实时转为文字/语音</li>
+                <li>双向实时对话，打破沟通壁垒</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🎯</span>核心功能</h2>
+            <div class="feature-grid">
+                <div class="feature-item">
+                    <div class="emoji">🗣️→✋</div>
+                    <h3>语音转手语</h3>
+                    <p>说话即见手语，3D虚拟人实时驱动</p>
+                </div>
+                <div class="feature-item">
+                    <div class="emoji">✋→📝</div>
+                    <h3>手语识别</h3>
+                    <p>拍摄手语视频，智能识别转文字</p>
+                </div>
+                <div class="feature-item">
+                    <div class="emoji">🔄</div>
+                    <h3>双向对话</h3>
+                    <p>健听人与听障人士实时无障碍沟通</p>
+                </div>
+                <div class="feature-item">
+                    <div class="emoji">📚</div>
+                    <h3>手语学习</h3>
+                    <p>词汇查询、跟练、AI纠错陪练</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">👥</span>目标用户与痛点</h2>
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-number">2700万+</div>
+                    <div class="stat-label">中国听障人群</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">70万</div>
+                    <div class="stat-label">手语翻译师缺口</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">95%</div>
+                    <div class="stat-label">场景无翻译服务</div>
+                </div>
+            </div>
+            <p><strong>核心用户：</strong></p>
+            <ul>
+                <li><strong>听障人士</strong>：医院看病、办事窗口、日常社交，缺乏即时翻译工具</li>
+                <li><strong>健听人家属/朋友</strong>：想学习手语与亲人沟通，缺乏系统学习资源</li>
+                <li><strong>公共服务机构</strong>：银行、医院、政务大厅，需要低成本无障碍服务方案</li>
+                <li><strong>手语学习者</strong>：需要实时反馈和陪练工具</li>
+            </ul>
+            <div class="highlight-box">
+                <p><strong>当前痛点：</strong>现有方案多为单向识别（手语→文字），且输出为冷冰冰的文字。听障人士"看文字"和"看手语"的理解效率完全不同，后者是他们的母语。</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">⭐</span>价值与意义</h2>
+            <p><strong>社会价值：</strong></p>
+            <ul>
+                <li>打破听障人士与社会的沟通壁垒，提升社会包容性</li>
+                <li>降低公共服务机构的无障碍服务成本</li>
+                <li>推动手语教育数字化，让更多人学习手语</li>
+            </ul>
+            <p><strong>技术价值：</strong></p>
+            <ul>
+                <li>填补"文字→手语虚拟人驱动"的技术空白</li>
+                <li>手语文法引擎：解决中文语序与手语语序的转换难题</li>
+                <li>3D实时骨骼动画合成，非预录视频播放</li>
+            </ul>
+            <p><strong>商业价值：</strong></p>
+            <ul>
+                <li>公共服务机构付费部署（医院、银行、政务大厅）</li>
+                <li>手语教育SaaS订阅</li>
+                <li>企业无障碍合规解决方案</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🔧</span>技术架构</h2>
+            <p><strong>前端：</strong>React + Three.js (3D虚拟人渲染) + MediaPipe (手部捕捉)</p>
+            <p><strong>后端：</strong>Node.js + Express + SQLite</p>
+            <p><strong>AI能力：</strong></p>
+            <div class="tech-stack">
+                <span class="tech-tag">Whisper ASR</span>
+                <span class="tech-tag">自研手语文法引擎</span>
+                <span class="tech-tag">MediaPipe Hands</span>
+                <span class="tech-tag">Three.js WebGL</span>
+                <span class="tech-tag">WebRTC</span>
+                <span class="tech-tag">LLM意图识别</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🚀</span>差异化竞争力</h2>
+            <div class="highlight-box">
+                <p><strong>vs 现有手语识别工具：</strong></p>
+                <ul>
+                    <li>现有：单向识别，输出文字，工具感强</li>
+                    <li>我们：<strong>双向翻译</strong>，<strong>3D虚拟人输出</strong>，有温度</li>
+                </ul>
+                <p><strong>vs 通用AI翻译：</strong></p>
+                <ul>
+                    <li>通用：文字↔文字，不考虑手语语法</li>
+                    <li>我们：专门的手语文法引擎，符合手语表达习惯</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card demo-section">
+            <h2><span class="icon">🎬</span>产品演示</h2>
+            <p style="margin-bottom: 24px;">点击下方按钮，体验手语桥的核心交互流程</p>
+            <a href="#" class="demo-btn" onclick="alert('Demo功能将在初赛阶段完善，当前为创意提案阶段')">体验演示</a>
+        </div>
+
+        <div class="footer">
+            <p>手语桥 SignBridge —— 烛光虽微，却能照亮黑暗；言辞虽简，却能传递心意</p>
+            <p>TRAE AI 创造力大赛 · 社会服务赛道</p>
+        </div>
+    </div>
+</body>
+</html>
