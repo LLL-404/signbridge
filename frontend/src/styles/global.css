@@ -53,6 +53,54 @@ body {
   color: #fafafa;
 }
 
+/* 非手动标记头部动作动画 */
+@keyframes head-nod {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(2px) rotate(3deg); }
+  75% { transform: translateY(-2px) rotate(-3deg); }
+}
+
+@keyframes head-slight-nod {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(1px); }
+}
+
+@keyframes head-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+@keyframes head-tilt-left {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-8deg); }
+}
+
+@keyframes head-tilt-right {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(8deg); }
+}
+
+.animate-nod {
+  animation: head-nod 0.7s ease-in-out infinite;
+}
+
+.animate-slight-nod {
+  animation: head-slight-nod 1s ease-in-out infinite;
+}
+
+.animate-shake {
+  animation: head-shake 0.5s ease-in-out infinite;
+}
+
+.animate-tilt-left {
+  animation: head-tilt-left 1.2s ease-in-out infinite;
+}
+
+.animate-tilt-right {
+  animation: head-tilt-right 1.2s ease-in-out infinite;
+}
+
 @layer components {
   .card {
     @apply rounded-xl border border-dark-600/60 bg-dark-800/80 backdrop-blur-sm;

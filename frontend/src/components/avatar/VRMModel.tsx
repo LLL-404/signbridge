@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, type VRM } from '@pixiv/three-vrm';
 import type { BonePose } from '@/types/avatar';
+import { FacialExpression, HeadMovement } from '@/types/sign';
 
 // 骨骼映射：AvatarDriver 内部名称 → VRM humanoid 标准骨骼名称
 const INTERNAL_TO_VRM_BONE: Record<string, string> = {
@@ -65,16 +66,15 @@ const INTERNAL_TO_VRM_BONE: Record<string, string> = {
 
 // 表情映射：AvatarDriver FacialExpression → VRM expression preset
 const EXPRESSION_MAP: Record<string, string> = {
-  HAPPY: 'happy',
-  happy: 'happy',
-  SAD: 'sad',
-  sad: 'sad',
-  ANGRY: 'angry',
-  angry: 'angry',
-  SURPRISED: 'surprised',
-  surprised: 'surprised',
-  NEUTRAL: 'neutral',
-  neutral: 'neutral',
+  [FacialExpression.NEUTRAL]: 'neutral',
+  [FacialExpression.HAPPY]: 'happy',
+  [FacialExpression.SAD]: 'sad',
+  [FacialExpression.ANGRY]: 'angry',
+  [FacialExpression.SURPRISED]: 'surprised',
+  [FacialExpression.CONFUSED]: 'sad',
+  [FacialExpression.QUESTION]: 'surprised',
+  [FacialExpression.NEGATIVE]: 'angry',
+  [FacialExpression.EMPHASIS]: 'angry',
 };
 
 function v3ToEuler(v: { x: number; y: number; z: number }) {
@@ -106,6 +106,7 @@ export function VRMModel({
   const blinkTimerRef = useRef(0);
   const isBlinkingRef = useRef(false);
   const blinkOpenRef = useRef(1);
+  const headAnimTimeRef = useRef(0);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // 更新 pose 引用
@@ -164,6 +165,7 @@ export function VRMModel({
 
     const currentPose = poseRef.current;
     const humanoid = vrm.humanoid;
+    headAnimTimeRef.current += delta;
 
     // 身体骨骼驱动
     for (const [internalName, vrmBoneName] of Object.entries(INTERNAL_TO_VRM_BONE)) {
@@ -181,8 +183,18 @@ export function VRMModel({
         if (poseBone?.rotation) {
           boneNode.rotation.set(poseBone.rotation.x, 0, 0);
         }
+      } else if (internalName === 'head' || internalName === 'neck') {
+        // 头部和颈部骨骼，稍后叠加 head_movement 动画
+        const boneNode = humanoid.getRawBoneNode(vrmBoneName as any);
+        if (!boneNode) continue;
+        const poseBone = currentPose[internalName as keyof BonePose] as
+          | { rotation?: { x: number; y: number; z: number } }
+          | undefined;
+        if (poseBone?.rotation) {
+          boneNode.rotation.copy(v3ToEuler(poseBone.rotation));
+        }
       } else {
-        // 身体骨骼
+        // 其他身体骨骼
         const boneNode = humanoid.getRawBoneNode(vrmBoneName as any);
         if (!boneNode) continue;
         const poseBone = currentPose[internalName as keyof BonePose] as
@@ -192,6 +204,48 @@ export function VRMModel({
           boneNode.rotation.copy(v3ToEuler(poseBone.rotation));
         }
       }
+    }
+
+    // 头部运动驱动（叠加到 head/neck 骨骼）
+    const headBone = humanoid.getRawBoneNode('head' as any);
+    const neckBone = humanoid.getRawBoneNode('neck' as any);
+    const poseHead = currentPose.head;
+    const baseRotX = poseHead?.rotation?.x ?? 0;
+    const baseRotY = poseHead?.rotation?.y ?? 0;
+    const baseRotZ = poseHead?.rotation?.z ?? 0;
+
+    let headOffsetX = 0;
+    let headOffsetY = 0;
+    let headOffsetZ = 0;
+    const t = headAnimTimeRef.current;
+
+    switch (currentPose.head_movement) {
+      case HeadMovement.NOD:
+        headOffsetX = Math.sin(t * Math.PI * 2 * 1.5) * 0.25;
+        break;
+      case HeadMovement.SLIGHT_NOD:
+        headOffsetX = Math.sin(t * Math.PI * 2) * 0.1;
+        break;
+      case HeadMovement.SHAKE:
+        headOffsetY = Math.sin(t * Math.PI * 2 * 2) * 0.35;
+        break;
+      case HeadMovement.TILT_LEFT:
+        headOffsetZ = Math.abs(Math.sin(t * Math.PI)) * 0.2;
+        break;
+      case HeadMovement.TILT_RIGHT:
+        headOffsetZ = -Math.abs(Math.sin(t * Math.PI)) * 0.2;
+        break;
+    }
+
+    if (headBone) {
+      headBone.rotation.x = baseRotX + headOffsetX;
+      headBone.rotation.y = baseRotY + headOffsetY;
+      headBone.rotation.z = baseRotZ + headOffsetZ;
+    }
+    if (neckBone) {
+      neckBone.rotation.x = baseRotX + headOffsetX * 0.4;
+      neckBone.rotation.y = baseRotY + headOffsetY * 0.4;
+      neckBone.rotation.z = baseRotZ + headOffsetZ * 0.4;
     }
 
     // 表情驱动

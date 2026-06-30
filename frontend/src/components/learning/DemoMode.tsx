@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AvatarCanvas from '@/components/avatar/AvatarCanvas';
+import NonManualMarkerOverlay from '@/components/avatar/NonManualMarkerOverlay';
 import { useAvatarPlayer } from '@/hooks/useAvatarPlayer';
 import { grammarEngine } from '@/modules/grammar/GrammarEngine';
 import {
@@ -46,17 +47,15 @@ export function DemoMode() {
     setDisplayedText(step.text);
     setGlossItems([]);
 
-    if (step.speaker === 'hearing') {
-      try {
-        const glossSeq = await grammarEngine.convert(step.text);
-        const chineseWords = glossSeq.items.map((item) => item.chinese);
-        setGlossItems(chineseWords);
-        if (chineseWords.length > 0) {
-          await playSequence(glossSeq);
-        }
-      } catch {
-        // 词汇库中未找到时不阻断演示
+    try {
+      const glossSeq = await grammarEngine.convert(step.text);
+      const chineseWords = glossSeq.items.map((item) => item.chinese);
+      setGlossItems(chineseWords);
+      if (chineseWords.length > 0) {
+        await playSequence(glossSeq);
       }
+    } catch {
+      // 词汇库中未找到时不阻断演示
     }
   }, [playSequence]);
 
@@ -167,6 +166,7 @@ export function DemoMode() {
             <div className="flex-1">
               <div className="bg-dark-900 rounded-xl overflow-hidden aspect-video relative">
                 <AvatarCanvas pose={pose} width="100%" height="100%" className="!rounded-none" />
+                <NonManualMarkerOverlay pose={pose} />
                 {!displayedText && (
                   <div className="absolute inset-0 flex items-center justify-center text-content-muted">
                     选择场景并开始演示
