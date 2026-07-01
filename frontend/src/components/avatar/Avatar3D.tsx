@@ -1,5 +1,5 @@
 // 3D 虚拟人 React 组件
-import { useRef, useMemo, useEffect, Suspense, type CSSProperties } from 'react';
+import { useRef, useMemo, useEffect, Suspense, type CSSProperties, lazy } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -70,6 +70,10 @@ function SkeletonAvatarModel({ pose }: { pose: BonePose }) {
 }
 
 /** VRM 模式组件（懒加载避免 SSR 问题） */
+const LazyVRMModel = lazy(() =>
+  import('./VRMModel').then((mod) => ({ default: mod.VRMModel })),
+);
+
 function VRMAvatarModel({
   pose,
   modelUrl,
@@ -79,11 +83,7 @@ function VRMAvatarModel({
   modelUrl?: string;
   onLoaded?: (vrm: unknown) => void;
 }) {
-  // 动态导入避免 tree-shaking 和 SSR 问题
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { VRMModel } = require('./VRMModel');
-  if (!VRMModel) return null;
-  return <VRMModel pose={pose} modelUrl={modelUrl} onLoaded={onLoaded} />;
+  return <LazyVRMModel pose={pose} modelUrl={modelUrl} onLoaded={onLoaded} />;
 }
 
 /** 3D 虚拟人组件 */

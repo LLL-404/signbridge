@@ -92,24 +92,21 @@ export default defineConfig({
     open: false,
   },
   build: {
-    // 分包策略：将大依赖拆分为独立 chunk，按需加载
+    target: 'es2020',
+    cssCodeSplit: true,
+    sourcemap: false,
+    minify: 'esbuild',
     rollupOptions: {
       output: {
         manualChunks: {
-          // React 核心（首屏必载，体积小）
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          // 3D 渲染（仅 avatar 插件需要，~600KB）
           'three-vendor': ['three', '@react-three/fiber', '@react-three/drei'],
-          // TensorFlow.js（仅 LSTM 模式需要，~1.5MB）
           'tfjs-vendor': ['@tensorflow/tfjs'],
-          // MediaPipe（识别插件需要，~300KB）
           'mediapipe-vendor': ['@mediapipe/tasks-vision'],
-          // 状态管理
           'state-vendor': ['zustand'],
         },
       },
     },
-    // 提高警告阈值（分包后单个 chunk 仍可能超 500KB）
     chunkSizeWarningLimit: 1000,
   },
 })

@@ -4,7 +4,28 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0a0f" />
+    <meta name="description" content="AI 驱动的双向手语翻译系统" />
     <title>手语桥 SignBridge</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="dns-prefetch" href="https://storage.googleapis.com" />
+    <style>
+      html, body { margin: 0; padding: 0; background: #0a0a0f; }
+      #app-splash {
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; background: #0a0a0f;
+        z-index: 9999; font-family: system-ui, -apple-system, sans-serif;
+      }
+      #app-splash .splash-icon { font-size: 64px; margin-bottom: 16px; }
+      #app-splash .splash-spinner {
+        width: 32px; height: 32px; border: 3px solid #3b82f6;
+        border-top-color: transparent; border-radius: 50%;
+        animation: spin 0.8s linear infinite; margin-bottom: 12px;
+      }
+      #app-splash .splash-text { color: #94a3b8; font-size: 14px; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #app-splash.hidden { opacity: 0; transition: opacity 0.3s ease; pointer-events: none; }
+    </style>
     <script>
       (function () {
         var redirect = sessionStorage.redirect;
@@ -16,7 +37,22 @@
     </script>
   </head>
   <body>
+    <div id="app-splash">
+      <div class="splash-icon">✋</div>
+      <div class="splash-spinner"></div>
+      <div class="splash-text">手语桥启动中...</div>
+    </div>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module">
+      import('/src/main.tsx').then(function() {
+        setTimeout(function() {
+          var splash = document.getElementById('app-splash');
+          if (splash) {
+            splash.classList.add('hidden');
+            setTimeout(function() { splash.remove(); }, 300);
+          }
+        }, 100);
+      });
+    </script>
   </body>
 </html>
