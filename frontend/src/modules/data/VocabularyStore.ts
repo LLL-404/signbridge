@@ -22,8 +22,6 @@ export class VocabularyStore extends BaseDataStore<SignGloss> {
 
   /** 标记缓存是否已加载全部数据（完整词汇库） */
   private isFullCacheLoaded = false;
-  /** 标记是否正在从 IndexedDB 加载完整数据 */
-  private isLoading = false;
   /** 加载 Promise，避免重复加载 */
   private loadPromise: Promise<void> | null = null;
 
@@ -104,7 +102,6 @@ export class VocabularyStore extends BaseDataStore<SignGloss> {
     if (this.isFullCacheLoaded) return;
     if (this.loadPromise) return this.loadPromise;
 
-    this.isLoading = true;
     this.loadPromise = this.loadFullCache();
     return this.loadPromise;
   }
@@ -119,8 +116,6 @@ export class VocabularyStore extends BaseDataStore<SignGloss> {
       }
     } catch (err) {
       console.warn('加载完整词汇缓存失败，使用内置常用词汇:', err);
-    } finally {
-      this.isLoading = false;
     }
   }
 
