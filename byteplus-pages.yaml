@@ -1,0 +1,18 @@
+build:
+  command: cd frontend && npm install && npm run build
+  output: frontend/dist
+
+routes:
+  - src: /(.*\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|vrm|json|webmanifest))$
+    dest: /$1
+  - src: /.*
+    dest: /index.html
+    status: 200
+
+headers:
+  - src: /sw.js
+    headers:
+      Cache-Control: no-cache, no-store, must-revalidate
+  - src: /(.*\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf))$
+    headers:
+      Cache-Control: public, max-age=31536000, immutable
