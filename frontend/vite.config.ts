@@ -26,6 +26,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 import path from 'node:path'
 
 export default defineConfig({
+  base: process.env.GITHUB_PAGES ? '/signbridge/' : '/',
   plugins: [
     react(),
     VitePWA({
@@ -38,8 +39,8 @@ export default defineConfig({
         theme_color: '#0a0a0f',
         background_color: '#0a0a0f',
         display: 'standalone',
-        scope: '/',
-        start_url: '/',
+        scope: process.env.GITHUB_PAGES ? '/signbridge/' : '/',
+        start_url: process.env.GITHUB_PAGES ? '/signbridge/' : '/',
         lang: 'zh-CN',
         icons: [
           {
@@ -58,8 +59,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,json,wasm}'],
-        // 不缓存 TF.js 模型和 MediaPipe wasm（太大，按需加载）
-        navigateFallback: '/index.html',
+        navigateFallback: process.env.GITHUB_PAGES ? '/signbridge/index.html' : '/index.html',
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/.*/i,
