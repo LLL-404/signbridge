@@ -179,30 +179,39 @@ export function VoiceToSignPage() {
   }, [setIsPlaying]);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <PageHeader
         title="语音转手语"
         subtitle="说出中文，虚拟人将用手语为你重述"
         icon="🗣️"
       />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:gap-6 lg:grid-cols-2">
+        {/* 虚拟人展示（移动端优先显示在上方） */}
+        <div className="order-1 flex items-start justify-center lg:order-2">
+          <div className="card animate-fade-up w-full overflow-hidden p-2 md:p-3" style={{ animationDelay: '120ms' }}>
+            <div className="aspect-[4/5] w-full">
+              <AvatarCanvas pose={currentPose} width="100%" height="100%" />
+            </div>
+          </div>
+        </div>
+
         {/* 左侧：语音输入 + 识别文字 + 手语词汇序列 */}
-        <div className="flex flex-col gap-4">
+        <div className="order-2 flex flex-col gap-3 md:gap-4 lg:order-1">
           {/* 语音输入区域 */}
-          <div className="card animate-fade-up p-5" style={{ animationDelay: '80ms' }}>
+          <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '80ms' }}>
             <VoiceInput onText={handleText} placeholder="点击麦克风开始说话" />
           </div>
 
           {/* 识别文字显示 */}
-          <div className="card animate-fade-up p-5" style={{ animationDelay: '160ms' }}>
-            <div className="mb-3 flex items-center gap-2">
+          <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '160ms' }}>
+            <div className="mb-2 md:mb-3 flex items-center gap-2">
               <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
               <h3 className="text-sm font-semibold text-content-primary">识别文字</h3>
             </div>
-            <div className="min-h-[64px] rounded-lg border border-dark-600 bg-dark-900/50 p-3">
+            <div className="min-h-[56px] md:min-h-[64px] rounded-lg border border-dark-600 bg-dark-900/50 p-3">
               {finalText || interimText ? (
-                <p className="text-content-primary">
+                <p className="text-sm md:text-base text-content-primary">
                   {finalText}
                   <span className="text-content-tertiary">{interimText}</span>
                 </p>
@@ -213,8 +222,8 @@ export function VoiceToSignPage() {
           </div>
 
           {/* 手语词汇序列（语法引擎转换结果） */}
-          <div className="card animate-fade-up p-5" style={{ animationDelay: '240ms' }}>
-            <div className="mb-3 flex items-center gap-2">
+          <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '240ms' }}>
+            <div className="mb-2 md:mb-3 flex items-center gap-2">
               <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
               <h3 className="text-sm font-semibold text-content-primary">手语词汇序列</h3>
             </div>
@@ -225,7 +234,7 @@ export function VoiceToSignPage() {
                 {glossItems.map((item, idx) => (
                   <span
                     key={`${item.gloss_id}-${idx}`}
-                    className="chip animate-fade-up"
+                    className="chip animate-fade-up text-xs md:text-sm"
                     style={{ animationDelay: `${idx * 40}ms` }}
                   >
                     {item.chinese}
@@ -237,20 +246,13 @@ export function VoiceToSignPage() {
             )}
           </div>
         </div>
-
-        {/* 右侧：虚拟人展示（AvatarCanvas 根据 mode 自动切换 3D/2D） */}
-        <div className="flex items-start justify-center">
-          <div className="card animate-fade-up overflow-hidden p-3" style={{ animationDelay: '120ms' }}>
-            <AvatarCanvas pose={currentPose} width={480} height={560} />
-          </div>
-        </div>
       </div>
 
       {/* 底部控制栏：语速滑块 + 3D/2D 切换 + 播放/停止 */}
-      <div className="card animate-fade-up flex flex-wrap items-center gap-6 p-5" style={{ animationDelay: '320ms' }}>
+      <div className="card animate-fade-up flex flex-col gap-4 p-4 md:p-5 md:flex-row md:flex-wrap md:items-center md:gap-6" style={{ animationDelay: '320ms' }}>
         {/* 语速滑块 */}
         <div className="flex items-center gap-3">
-          <label htmlFor="speed-slider" className="text-sm font-medium text-content-secondary">
+          <label htmlFor="speed-slider" className="text-xs md:text-sm font-medium text-content-secondary whitespace-nowrap">
             语速
           </label>
           <input
@@ -261,51 +263,53 @@ export function VoiceToSignPage() {
             step={SPEED_STEP}
             value={playbackSpeed}
             onChange={handleSpeedChange}
-            className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-dark-600 accent-accent-500"
+            className="h-1.5 flex-1 w-24 md:w-32 cursor-pointer appearance-none rounded-full bg-dark-600 accent-accent-500"
           />
-          <span className="w-12 text-sm font-bold text-accent-300">
+          <span className="w-10 md:w-12 text-xs md:text-sm font-bold text-accent-300">
             {playbackSpeed.toFixed(1)}x
           </span>
         </div>
 
         {/* 3D / 2D 模式切换 */}
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-content-secondary">模式</span>
-          <button
-            type="button"
-            onClick={() => setMode('3d')}
-            className={`rounded-lg px-3 py-1 text-sm font-medium transition-all ${
-              mode === '3d'
-                ? 'bg-accent-500 text-white'
-                : 'border border-dark-600 bg-dark-800 text-content-secondary hover:text-content-primary'
-            }`}
-          >
-            3D
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('2d')}
-            className={`rounded-lg px-3 py-1 text-sm font-medium transition-all ${
-              mode === '2d'
-                ? 'bg-accent-500 text-white'
-                : 'border border-dark-600 bg-dark-800 text-content-secondary hover:text-content-primary'
-            }`}
-          >
-            2D
-          </button>
+          <span className="text-xs md:text-sm font-medium text-content-secondary whitespace-nowrap">模式</span>
+          <div className="flex">
+            <button
+              type="button"
+              onClick={() => setMode('3d')}
+              className={`rounded-l-lg px-3 md:px-4 py-1.5 md:py-2 text-xs md:text-sm font-medium transition-all ${
+                mode === '3d'
+                  ? 'bg-accent-500 text-white'
+                  : 'border border-dark-600 border-r-0 bg-dark-800 text-content-secondary hover:text-content-primary'
+              }`}
+            >
+              3D
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('2d')}
+              className={`rounded-r-lg px-3 md:px-4 py-1.5 md:py-2 text-xs md:text-sm font-medium transition-all ${
+                mode === '2d'
+                  ? 'bg-accent-500 text-white'
+                  : 'border border-dark-600 bg-dark-800 text-content-secondary hover:text-content-primary'
+              }`}
+            >
+              2D
+            </button>
+          </div>
         </div>
 
         {/* 播放 / 停止 */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 md:ml-auto">
           <button
             type="button"
             onClick={handleStop}
             disabled={!isPlaying}
-            className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-1.5 text-sm font-medium text-red-400 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex-1 md:flex-none rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs md:text-sm font-medium text-red-400 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
             ⏹ 停止
           </button>
-          <span className={`text-sm ${isPlaying ? 'text-accent-300' : 'text-content-muted'}`}>
+          <span className={`text-xs md:text-sm whitespace-nowrap ${isPlaying ? 'text-accent-300' : 'text-content-muted'}`}>
             {isPlaying ? '● 播放中' : '○ 就绪'}
           </span>
         </div>

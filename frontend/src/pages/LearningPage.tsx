@@ -39,7 +39,7 @@ export function LearningPage() {
   const [mode, setMode] = useState<LearningMode>('search');
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <PageHeader
         title="手语学习"
         subtitle="查询词汇、跟练动作、AI 陪练，循序渐进"
@@ -47,13 +47,13 @@ export function LearningPage() {
       />
 
       {/* 模式切换标签 */}
-      <div className="card animate-fade-up flex flex-wrap justify-center gap-2 p-3" style={{ animationDelay: '80ms' }}>
+      <div className="card animate-fade-up flex flex-wrap justify-center gap-2 p-2 md:p-3" style={{ animationDelay: '80ms' }}>
         {MODE_TABS.map((tab) => (
           <button
             key={tab.key}
             type="button"
             onClick={() => setMode(tab.key)}
-            className={`group flex items-center gap-2 rounded-lg px-5 py-2.5 font-medium transition-all ${
+            className={`group flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all md:flex-none md:px-5 md:py-2.5 ${
               mode === tab.key
                 ? 'bg-accent-500 text-white shadow-md'
                 : 'border border-dark-600 bg-dark-800 text-content-secondary hover:border-accent-500/40 hover:text-content-primary'
@@ -68,7 +68,7 @@ export function LearningPage() {
       </div>
 
       {/* 根据模式渲染内容 */}
-      <div className="card animate-fade-up p-6" style={{ animationDelay: '160ms' }}>
+      <div className="card animate-fade-up p-4 md:p-6" style={{ animationDelay: '160ms' }}>
         {mode === 'search' && <WordSearch />}
         {mode === 'practice' && <PracticeMode />}
         {mode === 'tutor' && <AITutor />}

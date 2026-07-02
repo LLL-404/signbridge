@@ -34,8 +34,8 @@ export function Layout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <Header onMenuToggle={() => setSidebarOpen((v) => !v)} />
 
-        <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-7xl px-6 py-8 md:px-10 md:py-12">
+        <main className="flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+          <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6 md:px-10 md:py-12">
             <Outlet />
           </div>
         </main>

@@ -1,6 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useHandTracking } from '@/hooks/useHandTracking';
 import type { FrameKeypoints } from '@/types/recognition';
+
+type SizeProp = number | string;
+
+function resolveSize(size: SizeProp, fallback: number): { numeric: number; style: string | number } {
+  if (typeof size === 'number') return { numeric: size, style: size };
+  return { numeric: fallback, style: size };
+}
 
 /** SignCamera 组件 Props */
 export interface SignCameraProps {
@@ -9,9 +16,9 @@ export interface SignCameraProps {
   /** 是否显示关键点叠加，默认 true */
   showLandmarks?: boolean;
   /** 视频宽度，默认 640 */
-  width?: number;
+  width?: SizeProp;
   /** 视频高度，默认 480 */
-  height?: number;
+  height?: SizeProp;
 }
 
 /** 状态提示文本映射 */
@@ -36,6 +43,10 @@ export function SignCamera({
   width = 640,
   height = 480,
 }: SignCameraProps) {
+  const resolvedWidth = useMemo(() => resolveSize(width, 640), [width]);
+  const resolvedHeight = useMemo(() => resolveSize(height, 480), [height]);
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const {
     videoRef,
     canvasRef,
@@ -44,7 +55,7 @@ export function SignCamera({
     error,
     start,
     stop,
-  } = useHandTracking({ width, height });
+  } = useHandTracking({ width: resolvedWidth.numeric, height: resolvedHeight.numeric });
 
   // 关键点变化时触发回调
   useEffect(() => {
@@ -65,8 +76,9 @@ export function SignCamera({
     <div className="flex flex-col items-center gap-4">
       {/* 摄像头预览容器：圆角 + 半透明边框 */}
       <div
-        className="relative overflow-hidden rounded-2xl border border-white/40 bg-black shadow-lg"
-        style={{ width, height }}
+        ref={containerRef}
+        className="relative w-full overflow-hidden rounded-2xl border border-white/40 bg-black shadow-lg"
+        style={{ width: resolvedWidth.style, height: resolvedHeight.style }}
       >
         {/* video 元素：隐藏，仅作为数据源 */}
         <video
@@ -81,7 +93,7 @@ export function SignCamera({
           <canvas
             ref={canvasRef}
             className="h-full w-full"
-            style={{ width, height }}
+            style={{ width: '100%', height: '100%' }}
           />
         ) : (
           // 不显示关键点时，仅展示占位

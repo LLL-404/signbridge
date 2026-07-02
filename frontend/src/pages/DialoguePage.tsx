@@ -232,7 +232,7 @@ export function DialoguePage() {
   );
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <PageHeader
         title="双向对话"
         subtitle="健听人语音 ↔ 听障人手语，实时双向沟通"
@@ -240,12 +240,12 @@ export function DialoguePage() {
       />
 
       {/* 对话历史（顶部，全宽） */}
-      <div className="card animate-fade-up p-5" style={{ animationDelay: '80ms' }}>
+      <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '80ms' }}>
         <div className="mb-3 flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
           <h3 className="text-sm font-semibold text-content-primary">对话历史</h3>
         </div>
-        <div className="max-h-[200px] overflow-y-auto">
+        <div className="max-h-[160px] overflow-y-auto md:max-h-[200px]">
           {messages.length === 0 ? (
             <p className="py-4 text-center text-sm text-content-muted">
               暂无对话记录，开始说话或打手语吧
@@ -258,7 +258,7 @@ export function DialoguePage() {
                   className={`flex ${msg.sender === 'hearing' ? 'justify-start' : 'justify-end'}`}
                 >
                   <div
-                    className={`max-w-[70%] rounded-2xl px-4 py-2 ${
+                    className={`max-w-[85%] rounded-2xl px-3 py-2 md:max-w-[70%] md:px-4 ${
                       msg.sender === 'hearing'
                         ? 'border border-accent-500/20 bg-accent-500/10 text-content-primary'
                         : 'border border-cyan-500/20 bg-cyan-500/10 text-cyan-400'
@@ -274,7 +274,7 @@ export function DialoguePage() {
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 text-base font-medium">{msg.text}</p>
+                    <p className="mt-1 text-sm font-medium md:text-base">{msg.text}</p>
                   </div>
                 </li>
               ))}
@@ -284,21 +284,23 @@ export function DialoguePage() {
       </div>
 
       {/* 双面板：左健听人 / 右听障人 */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-2">
         {/* 健听人面板：语音输入 + 虚拟人展示 */}
-        <div className="card animate-fade-up flex flex-col gap-4 p-5" style={{ animationDelay: '160ms' }}>
+        <div className="card animate-fade-up flex flex-col gap-3 p-4 md:gap-4 md:p-5" style={{ animationDelay: '160ms' }}>
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 items-center justify-center rounded-full border border-accent-500/30 bg-accent-500/15 text-lg">🎤</span>
             <h3 className="font-bold text-content-primary">健听人（语音）</h3>
           </div>
           <VoiceInput onText={handleVoiceText} placeholder="点击麦克风说话，将转为手语" />
           <div className="flex items-start justify-center">
-            <AvatarCanvas pose={currentPose} width={360} height={420} />
+            <div className="aspect-[6/7] w-full max-w-[360px]">
+              <AvatarCanvas pose={currentPose} width="100%" height="100%" />
+            </div>
           </div>
         </div>
 
         {/* 听障人面板：摄像头 + 识别结果 */}
-        <div className="card animate-fade-up flex flex-col gap-4 p-5" style={{ animationDelay: '240ms' }}>
+        <div className="card animate-fade-up flex flex-col gap-3 p-4 md:gap-4 md:p-5" style={{ animationDelay: '240ms' }}>
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 items-center justify-center rounded-full border border-cyan-500/30 bg-cyan-500/15 text-lg">👋</span>
             <h3 className="font-bold text-content-primary">听障人（手语）</h3>
@@ -309,14 +311,16 @@ export function DialoguePage() {
             </div>
           ) : (
             <>
-              <SignCamera
-                onKeypoints={handleKeypoints}
-                showLandmarks
-                width={360}
-                height={270}
-              />
+              <div className="aspect-[4/3] w-full">
+                <SignCamera
+                  onKeypoints={handleKeypoints}
+                  showLandmarks
+                  width="100%"
+                  height="100%"
+                />
+              </div>
               <div className="rounded-lg border border-dark-600 bg-dark-900/40 p-3 text-center">
-                <span className="text-sm text-content-secondary">
+                <span className="text-xs md:text-sm text-content-secondary">
                   状态：{signStatus === 'idle' ? '等待启动' :
                     signStatus === 'waiting' ? '等待手部运动' :
                     signStatus === 'capturing' ? '捕捉中...' :
