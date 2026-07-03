@@ -65,12 +65,19 @@ export type SpeechErrorHandler = (error: string) => void;
  * SpeechRecognizer
  * 封装 Web Speech API 的 SpeechRecognition 接口，
  * 自动处理浏览器前缀（webkitSpeechRecognition）。
+ *
+ * 竞态保护：通过 isStarting / isRecognizing 两个标志避免重复 start
+ * 抛出 InvalidStateError，并在 start 前先 abort() 清理上次会话。
  */
 export class SpeechRecognizer {
   private recognition: SpeechRecognition | null = null;
   private lang: string;
   private continuous: boolean;
   private interimResults: boolean;
+  /** start 防重入标志：start() 调用到 onstart 触发之间为 true */
+  private isStarting = false;
+  /** 是否正在识别中（onstart → onend 之间为 true） */
+  private isRecognizing = false;
 
   // 事件回调（外部赋值）
   public onResult: SpeechResultHandler | null = null;
@@ -99,12 +106,17 @@ export class SpeechRecognizer {
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
+      this.isStarting = false;
+      this.isRecognizing = true;
       this.onStart?.();
     };
     recognition.onend = () => {
+      this.isStarting = false;
+      this.isRecognizing = false;
       this.onEnd?.();
     };
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      this.isStarting = false;
       this.onError?.(event.error || 'unknown');
     };
     recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -158,10 +170,15 @@ export class SpeechRecognizer {
       this.onError?.('not-supported');
       return;
     }
+    // 防重入：正在 start 或已识别中时直接返回，避免 InvalidStateError
+    if (this.isStarting || this.isRecognizing) return;
+    // 先 abort 清理上次会话状态，避免某些浏览器拒绝 start
+    try { this.recognition.abort(); } catch { /* ignore */ }
+    this.isStarting = true;
     try {
       this.recognition.start();
     } catch (err) {
-      // 重复 start 会抛 InvalidStateError，吞掉避免中断流程
+      this.isStarting = false;
       const message = err instanceof Error ? err.message : 'start-failed';
       this.onError?.(message);
     }
@@ -170,6 +187,7 @@ export class SpeechRecognizer {
   /** 停止识别（会触发 onend） */
   public stop(): void {
     if (!this.recognition) return;
+    if (!this.isRecognizing && !this.isStarting) return;
     try {
       this.recognition.stop();
     } catch {
@@ -185,5 +203,7 @@ export class SpeechRecognizer {
     } catch {
       // 忽略异常
     }
+    this.isStarting = false;
+    this.isRecognizing = false;
   }
 }

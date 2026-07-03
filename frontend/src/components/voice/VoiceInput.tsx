@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 
 interface VoiceInputProps {
@@ -10,26 +10,38 @@ interface VoiceInputProps {
 
 /**
  * VoiceInput
- * 语音输入组件：麦克风按钮 + 实时文本展示 + 状态提示。
+ * 语音/文字输入组件。
+ *
+ * 交互设计：
+ *   - 主交互：文字输入框（始终可用，回车发送，支持中文输入法 composing 状态）
+ *   - 可选交互：按住说话按钮（仅当浏览器支持 Web Speech API 时显示）
+ *     按下开始识别、松开结束，按住期间实时显示中间结果。
+ *
+ * 兼容性说明：Web Speech API 在国内网络环境下多数浏览器不可用，
+ * 因此文字输入作为 100% 可用的兜底通道，语音按钮不可用时自动隐藏。
  */
-export function VoiceInput({ onText, placeholder = '点击麦克风开始说话' }: VoiceInputProps) {
+export function VoiceInput({ onText, placeholder = '输入文字，或按住麦克风说话' }: VoiceInputProps) {
   const {
-    isListening,
-    transcript,
-    finalText,
-    error,
-    isSupported,
-    start,
-    stop,
-    reset,
+    isListening, transcript, finalText, error, isSupported,
+    start, stop, reset,
   } = useSpeechRecognition();
+
+  // 文字输入框状态
+  const [text, setText] = useState('');
+  // 按住说话状态
+  const [isPressed, setIsPressed] = useState(false);
 
   // 用 ref 持有最新的 onText，避免 effect 频繁重建
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
-
   // 记录上一次的 finalText，用于计算本次新增的最终文本片段
   const prevFinalRef = useRef(finalText);
+  // 同步：当 finalText 被外部 reset 清空时，prevFinalRef 也要同步清空
+  useEffect(() => {
+    if (finalText === '' && prevFinalRef.current !== '') {
+      prevFinalRef.current = '';
+    }
+  }, [finalText]);
 
   // 中间结果实时回调
   useEffect(() => {
@@ -49,76 +61,137 @@ export function VoiceInput({ onText, placeholder = '点击麦克风开始说话'
     }
   }, [finalText]);
 
-  /** 切换监听状态 */
-  const toggle = () => {
-    if (isListening) {
-      stop();
-    } else {
-      start();
+  /** 按下麦克风按钮：开始识别 */
+  const handlePressStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (!isSupported) return;
+    // 每次按下清空上一次的中间/最终结果，开始一段新的识别
+    reset();
+    prevFinalRef.current = '';
+    setIsPressed(true);
+    start();
+  }, [isSupported, reset, start]);
+
+  /** 松开麦克风按钮：结束识别 */
+  const handlePressEnd = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (!isPressed) return;
+    setIsPressed(false);
+    stop();
+  }, [isPressed, stop]);
+
+  /** 提交文字输入 */
+  const submitText = useCallback(() => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    onTextRef.current(trimmed, true);
+    setText('');
+  }, [text]);
+
+  /** 错误提示文案（按 Web Speech API 错误码细分） */
+  const getErrorMessage = (err: string): string => {
+    switch (err) {
+      case 'not-supported': return '当前浏览器不支持语音识别';
+      case 'not-allowed':
+      case 'service-not-allowed': return '麦克风权限被拒绝，请在浏览器设置中允许';
+      case 'network': return '网络异常，语音识别服务不可用（国内网络可能无法使用）';
+      case 'no-speech': return '没有检测到语音，请按住后说话';
+      case 'audio-capture': return '麦克风采集失败，请检查设备';
+      case 'aborted': return '';
+      default: return err ? `语音识别异常：${err}` : '';
     }
   };
+  const errorMsg = error ? getErrorMessage(error) : '';
 
-  // 状态提示文本（按优先级：不支持 > 出错 > 监听中 > 默认）
-  const statusText = !isSupported
-    ? '不支持语音识别'
-    : error
-      ? '识别出错'
-      : isListening
-        ? '正在聆听...'
-        : '点击说话';
-
-  // 展示文本：最终文本 + 中间结果，无内容时显示占位符
-  const displayText = (finalText + transcript).trim();
-  const isEmpty = !displayText;
+  // 语音实时识别展示文本（最终 + 中间）
+  const voiceDisplay = (finalText + transcript).trim();
 
   return (
-    <div className="flex w-full flex-col items-center gap-4">
-      {/* 麦克风按钮（带脉冲动画） */}
-      <div className="relative flex h-16 w-16 items-center justify-center">
-        {isListening && (
-          <span className="absolute inset-0 animate-ping rounded-full bg-brand-start opacity-60" />
-        )}
+    <div className="flex w-full flex-col gap-3">
+      {/* 文字输入区（主交互，始终可用） */}
+      <div className="flex w-full items-center gap-2">
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            // 中文输入法 composing 期间回车不提交
+            if (e.key === 'Enter' && !(e.nativeEvent as KeyboardEvent).isComposing) {
+              e.preventDefault();
+              submitText();
+            }
+          }}
+          placeholder={placeholder}
+          className="input flex-1"
+          aria-label="文字输入"
+        />
         <button
           type="button"
-          onClick={toggle}
-          disabled={!isSupported}
-          aria-label={isListening ? '停止语音输入' : '开始语音输入'}
-          className="relative flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-brand-start to-brand-end text-2xl text-white shadow-lg transition-transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+          onClick={submitText}
+          disabled={!text.trim()}
+          className="btn-primary px-4 py-2.5 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label="发送"
         >
-          🎤
+          发送
         </button>
       </div>
 
-      {/* 状态提示 */}
-      <div
-        className={`text-sm ${
-          error || !isSupported ? 'text-red-500' : 'text-gray-600'
-        }`}
-      >
-        {statusText}
-      </div>
+      {/* 按住说话按钮（仅浏览器支持 Web Speech API 时显示） */}
+      {isSupported && (
+        <div className="flex flex-col items-center gap-2">
+          <button
+            type="button"
+            onMouseDown={handlePressStart}
+            onMouseUp={handlePressEnd}
+            onMouseLeave={handlePressEnd}
+            onTouchStart={handlePressStart}
+            onTouchEnd={handlePressEnd}
+            onTouchCancel={handlePressEnd}
+            disabled={!!error && error !== 'no-speech' && error !== 'aborted'}
+            aria-label={isPressed ? '松开结束识别' : '按住说话'}
+            className={`relative flex h-16 w-16 select-none items-center justify-center rounded-full text-2xl shadow-lg transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 ${
+              isPressed
+                ? 'bg-accent-600 scale-105'
+                : 'bg-accent-500 hover:bg-accent-600'
+            }`}
+          >
+            {isListening && (
+              <span className="absolute inset-0 animate-ping rounded-full bg-accent-500 opacity-60" />
+            )}
+            <span className="relative">🎤</span>
+          </button>
+          <div className="text-xs text-content-tertiary">
+            {isPressed ? '松开完成' : '按住说话'}
+          </div>
+        </div>
+      )}
 
-      {/* 实时文字显示区域 */}
-      <div className="min-h-[80px] w-full rounded-lg bg-white/60 p-4 backdrop-blur">
-        {isEmpty ? (
-          <span className="text-gray-400">{placeholder}</span>
-        ) : (
-          <p className="text-gray-800">
-            {finalText}
-            <span className="text-gray-500">{transcript}</span>
-          </p>
-        )}
-      </div>
+      {/* 语音实时识别结果展示 */}
+      {isSupported && (voiceDisplay || isListening) && (
+        <div className="min-h-[56px] w-full rounded-lg border border-dark-600/60 bg-dark-800/60 p-3 backdrop-blur">
+          {voiceDisplay ? (
+            <p className="text-sm text-content-primary">
+              <span>{finalText}</span>
+              <span className="text-content-secondary">{transcript}</span>
+            </p>
+          ) : (
+            <span className="text-xs text-content-muted">{isListening ? '正在聆听...' : ' '}</span>
+          )}
+        </div>
+      )}
 
-      {/* 清空按钮 */}
-      {(transcript || finalText) && (
-        <button
-          type="button"
-          onClick={reset}
-          className="text-xs text-gray-500 underline hover:text-gray-700"
-        >
-          清空
-        </button>
+      {/* 错误提示 */}
+      {errorMsg && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-xs text-red-300">
+          {errorMsg}
+        </div>
+      )}
+
+      {/* 不支持语音时的提示 */}
+      {!isSupported && (
+        <div className="text-center text-xs text-content-muted">
+          当前浏览器不支持语音识别，请使用文字输入
+        </div>
       )}
     </div>
   );

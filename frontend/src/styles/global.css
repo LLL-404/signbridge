@@ -10,6 +10,16 @@
 
 * {
   box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 输入控件允许文本选择与编辑 */
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 html,
