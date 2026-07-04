@@ -237,122 +237,149 @@ export class Skeleton3D {
     }
   }
 
+  /** 创建胶囊体几何体（两端半球帽，总高度 = length + 2*radius）
+   *  CapsuleGeometry 沿 Y 轴，中心在原点
+   */
+  private makeCapsule(radius: number, totalLength: number, radialSegments = 12): THREE.CapsuleGeometry {
+    const cylLen = Math.max(0.001, totalLength - 2 * radius);
+    return new THREE.CapsuleGeometry(radius, cylLen, 8, radialSegments);
+  }
+
   /** 创建网格几何体并附加到骨骼
    *  关键约定：每个"关节 bone"上挂一段"从本关节出发到下一关节"的骨骼段 mesh，
-   *  mesh position.y = -length/2，使圆柱一端在关节点、另一端延伸到下一关节位置
+   *  mesh position.y = -length/2（向下延伸）或 +length/2（向上延伸），
+   *  使胶囊一端在关节点、另一端延伸到下一关节位置
    */
   private buildMeshes(): void {
-    // 头部
-    this.addMeshOffset('head', new THREE.SphereGeometry(LIMB.headRadius, 32, 32),
-      COLOR.skin, { x: 0, y: LIMB.headRadius * 0.6, z: 0 });
+    // === 头部（球体 + 面部特征） ===
+    const headBone = this.bones.get('head');
+    if (headBone) {
+      const headMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(LIMB.headRadius, 32, 32),
+        new THREE.MeshStandardMaterial({ color: COLOR.skin, roughness: 0.5, metalness: 0.05 }),
+      );
+      headMesh.position.y = LIMB.headRadius * 0.6;
+      headMesh.castShadow = true;
+      headBone.add(headMesh);
 
-    // 颈部段（chest→neck）：挂在 chest 下，沿 +Y 伸到 neck
-    this.addLimbMesh('chest', new THREE.CylinderGeometry(0.032, 0.038, LIMB.chestToNeck, 8),
-      COLOR.cloth, { x: 0, y: LIMB.chestToNeck / 2, z: 0 });
+      // 眼睛
+      const eyeGeo = new THREE.SphereGeometry(0.012, 8, 8);
+      const eyeMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.2 });
+      const eyeOffset = LIMB.headRadius * 0.45;
+      const eyeY = LIMB.headRadius * 0.2;
+      const eyeZ = LIMB.headRadius * 0.78;
+      const lEye = new THREE.Mesh(eyeGeo, eyeMat);
+      lEye.position.set(-eyeOffset, eyeY, eyeZ);
+      headBone.add(lEye);
+      const rEye = new THREE.Mesh(eyeGeo, eyeMat);
+      rEye.position.set(eyeOffset, eyeY, eyeZ);
+      headBone.add(rEye);
+    }
 
-    // 躯干段（spine→chest）：挂在 spine 下，沿 +Y 伸到 chest
-    this.addLimbMesh('spine', new THREE.CylinderGeometry(0.11, 0.13, LIMB.spineToChest, 16),
+    // === 颈部段（chest→neck）：胶囊体 ===
+    this.addLimbMesh('chest', this.makeCapsule(0.032, LIMB.chestToNeck, 10),
+      COLOR.skin, { x: 0, y: LIMB.chestToNeck / 2, z: 0 });
+
+    // === 躯干段（spine→chest）：胶囊体 ===
+    this.addLimbMesh('spine', this.makeCapsule(0.11, LIMB.spineToChest, 16),
       COLOR.cloth, { x: 0, y: LIMB.spineToChest / 2, z: 0 });
 
-    // 腰-胸段（hips→spine）：挂在 root(hips) 下
-    this.addLimbMesh('root', new THREE.CylinderGeometry(0.13, 0.14, LIMB.hipsToSpine, 16),
+    // === 腰-胸段（hips→spine）：胶囊体 ===
+    this.addLimbMesh('root', this.makeCapsule(0.13, LIMB.hipsToSpine, 16),
       COLOR.clothDark, { x: 0, y: LIMB.hipsToSpine / 2, z: 0 });
 
-    // 上臂段（shoulder→elbow）：圆柱从 shoulder 沿 -Y 到 elbow
-    this.addLimbMesh('left_shoulder', new THREE.CylinderGeometry(0.032, 0.028, LIMB.upperArm, 8),
+    // === 上臂段（shoulder→elbow）：胶囊体 ===
+    this.addLimbMesh('left_shoulder', this.makeCapsule(0.032, LIMB.upperArm, 10),
       COLOR.cloth, { x: 0, y: -LIMB.upperArm / 2, z: 0 });
-    this.addLimbMesh('right_shoulder', new THREE.CylinderGeometry(0.032, 0.028, LIMB.upperArm, 8),
+    this.addLimbMesh('right_shoulder', this.makeCapsule(0.032, LIMB.upperArm, 10),
       COLOR.cloth, { x: 0, y: -LIMB.upperArm / 2, z: 0 });
 
-    // 前臂段（elbow→wrist）：从 elbow 沿 -Y 到 wrist
-    this.addLimbMesh('left_elbow', new THREE.CylinderGeometry(0.028, 0.024, LIMB.forearm, 8),
+    // === 前臂段（elbow→wrist）：胶囊体 ===
+    this.addLimbMesh('left_elbow', this.makeCapsule(0.028, LIMB.forearm, 10),
       COLOR.skin, { x: 0, y: -LIMB.forearm / 2, z: 0 });
-    this.addLimbMesh('right_elbow', new THREE.CylinderGeometry(0.028, 0.024, LIMB.forearm, 8),
+    this.addLimbMesh('right_elbow', this.makeCapsule(0.028, LIMB.forearm, 10),
       COLOR.skin, { x: 0, y: -LIMB.forearm / 2, z: 0 });
 
-    // 手掌：作为 wrist 的子 box
+    // === 手掌：圆角 box ===
     this.addMeshOffset('left_wrist', new THREE.BoxGeometry(0.07, 0.08, 0.025),
       COLOR.palm, { x: 0, y: -0.04, z: 0 });
     this.addMeshOffset('right_wrist', new THREE.BoxGeometry(0.07, 0.08, 0.025),
       COLOR.palm, { x: 0, y: -0.04, z: 0 });
 
-    // 大腿段（hip→knee）
-    this.addLimbMesh('left_hip', new THREE.CylinderGeometry(0.045, 0.038, LIMB.upperLeg, 10),
+    // === 大腿段（hip→knee）：胶囊体 ===
+    this.addLimbMesh('left_hip', this.makeCapsule(0.045, LIMB.upperLeg, 12),
       COLOR.clothDark, { x: 0, y: -LIMB.upperLeg / 2, z: 0 });
-    this.addLimbMesh('right_hip', new THREE.CylinderGeometry(0.045, 0.038, LIMB.upperLeg, 10),
+    this.addLimbMesh('right_hip', this.makeCapsule(0.045, LIMB.upperLeg, 12),
       COLOR.clothDark, { x: 0, y: -LIMB.upperLeg / 2, z: 0 });
 
-    // 小腿段（knee→ankle）
-    this.addLimbMesh('left_knee', new THREE.CylinderGeometry(0.038, 0.032, LIMB.lowerLeg, 10),
+    // === 小腿段（knee→ankle）：胶囊体 ===
+    this.addLimbMesh('left_knee', this.makeCapsule(0.038, LIMB.lowerLeg, 12),
       COLOR.clothDark, { x: 0, y: -LIMB.lowerLeg / 2, z: 0 });
-    this.addLimbMesh('right_knee', new THREE.CylinderGeometry(0.038, 0.032, LIMB.lowerLeg, 10),
+    this.addLimbMesh('right_knee', this.makeCapsule(0.038, LIMB.lowerLeg, 12),
       COLOR.clothDark, { x: 0, y: -LIMB.lowerLeg / 2, z: 0 });
 
-    // 脚（脚踝处的小 box）
+    // === 脚（脚踝处的 box） ===
     this.addMeshOffset('left_ankle', new THREE.BoxGeometry(0.08, LIMB.ankleY, 0.14),
       0x2c2c3a, { x: 0, y: -LIMB.ankleY / 2, z: 0.035 });
     this.addMeshOffset('right_ankle', new THREE.BoxGeometry(0.08, LIMB.ankleY, 0.14),
       0x2c2c3a, { x: 0, y: -LIMB.ankleY / 2, z: 0.035 });
 
-    // 手指段
+    // === 手指段（胶囊体） ===
     for (const side of ['left', 'right'] as const) {
       for (const finger of FINGER_NAMES) {
         const lengths = FINGER_LENGTHS[finger];
         if (finger === 'thumb') {
-          // CMC 段
           const cmcLen = lengths[0];
-          this.addLimbMesh(`${side}_thumb_cmc`, new THREE.CylinderGeometry(0.013, 0.011, cmcLen, 6),
+          this.addLimbMesh(`${side}_thumb_cmc`, this.makeCapsule(0.012, cmcLen, 8),
             COLOR.skin, { x: 0, y: -cmcLen / 2, z: 0 });
-          // MCP 段
           const mcpLen = lengths[1];
-          this.addLimbMesh(`${side}_thumb_mcp`, new THREE.CylinderGeometry(0.012, 0.010, mcpLen, 6),
+          this.addLimbMesh(`${side}_thumb_mcp`, this.makeCapsule(0.011, mcpLen, 8),
             COLOR.skin, { x: 0, y: -mcpLen / 2, z: 0 });
-          // PIP 段
           const pipLen = lengths[2];
-          this.addLimbMesh(`${side}_thumb_pip`, new THREE.CylinderGeometry(0.011, 0.009, pipLen, 6),
+          this.addLimbMesh(`${side}_thumb_pip`, this.makeCapsule(0.010, pipLen, 8),
             COLOR.skin, { x: 0, y: -pipLen / 2, z: 0 });
-          // DIP 段（指尖）
           const dipLen = lengths[3] ?? 0.02;
-          this.addLimbMesh(`${side}_thumb_dip`, new THREE.CylinderGeometry(0.010, 0.008, dipLen, 6),
+          this.addLimbMesh(`${side}_thumb_dip`, this.makeCapsule(0.009, dipLen, 8),
             COLOR.skin, { x: 0, y: -dipLen / 2, z: 0 });
         } else {
           for (let ji = 0; ji < FINGER_JOINTS.length; ji++) {
             const jointName = FINGER_JOINTS[ji];
             const boneName = `${side}_${finger}_${jointName}`;
-            // 第 0 节（MCP）从 MCP 关节伸到 PIP 关节，长度 = lengths[0]
-            // 第 1 节（PIP）从 PIP 伸到 DIP，长度 = lengths[1]
-            // 第 2 节（DIP）指尖段，长度 = lengths[2]
             const len = lengths[ji] ?? 0.03;
-            const rTop = 0.011 - ji * 0.002;
-            const rBot = 0.009 - ji * 0.002;
-            this.addLimbMesh(boneName, new THREE.CylinderGeometry(rTop, rBot, len, 6),
+            const r = 0.010 - ji * 0.002;
+            this.addLimbMesh(boneName, this.makeCapsule(r, len, 8),
               COLOR.skin, { x: 0, y: -len / 2, z: 0 });
           }
         }
       }
     }
 
-    // 关节球（可选视觉提示：在几个关键关节位置放小球）
-    const jointBall = (name: string, r: number) => {
+    // === 关节球：用皮肤色球体填充关节缝隙，确保无缝连接 ===
+    const jointBall = (name: string, r: number, color: number = COLOR.skin) => {
       const b = this.bones.get(name);
       if (!b) return;
       const m = new THREE.Mesh(
-        new THREE.SphereGeometry(r, 12, 12),
-        new THREE.MeshStandardMaterial({ color: COLOR.joint, roughness: 0.5, metalness: 0.1 }),
+        new THREE.SphereGeometry(r, 16, 16),
+        new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.05 }),
       );
       m.castShadow = true;
       b.add(m);
     };
-    jointBall('left_shoulder', 0.022);
-    jointBall('right_shoulder', 0.022);
-    jointBall('left_elbow', 0.020);
-    jointBall('right_elbow', 0.020);
-    jointBall('left_wrist', 0.018);
-    jointBall('right_wrist', 0.018);
-    jointBall('left_knee', 0.022);
-    jointBall('right_knee', 0.022);
-    jointBall('left_hip', 0.025);
-    jointBall('right_hip', 0.025);
+    // 肩、肘、腕关节（皮肤色，和衣服色区分）
+    jointBall('left_shoulder', 0.034, COLOR.cloth);
+    jointBall('right_shoulder', 0.034, COLOR.cloth);
+    jointBall('left_elbow', 0.030);
+    jointBall('right_elbow', 0.030);
+    jointBall('left_wrist', 0.026);
+    jointBall('right_wrist', 0.026);
+    // 髋、膝关节（衣服色）
+    jointBall('left_hip', 0.048, COLOR.clothDark);
+    jointBall('right_hip', 0.048, COLOR.clothDark);
+    jointBall('left_knee', 0.040, COLOR.clothDark);
+    jointBall('right_knee', 0.040, COLOR.clothDark);
+    // 脊柱关节（衣服色，让躯干更连贯）
+    jointBall('spine', 0.115, COLOR.cloth);
+    jointBall('chest', 0.108, COLOR.cloth);
   }
 
   /** 挂载"骨骼段圆柱"网格（castShadow 默认开启） */
