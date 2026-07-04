@@ -5,63 +5,107 @@
  * 将 AvatarDriver 生成的 BonePose 映射到 VRM 人形骨骼。
  *
  * 支持：
- *   - 骨骼驱动（身体 + 手指）
+ *   - 骨骼驱动（身体 + 下肢 + 手指）
+ *   - 骨骼重定向（T-pose → A-pose 差异校正）
+ *   - 平滑滤波（One-Euro Filter）
  *   - 面部表情（blendshape）
  *   - 自动眨眼
  *   - 注视跟踪
  */
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, type VRM } from '@pixiv/three-vrm';
 import type { BonePose } from '@/types/avatar';
-import { FacialExpression, HeadMovement } from '@/types/sign';
+import { FacialExpression, HeadMovement, HandShape } from '@/types/sign';
+import { getHandShapeDefinition } from '@/modules/avatar/HandShape';
+import { retargetRotation } from '@/modules/avatar/Retargeter';
+import { BoneSmoother } from '@/modules/avatar/Smoother';
 
-// 骨骼映射：AvatarDriver 内部名称 → VRM humanoid 标准骨骼名称
-const INTERNAL_TO_VRM_BONE: Record<string, string> = {
+// 身体骨骼映射：AvatarDriver 内部名称 → VRM humanoid 标准骨骼名称
+// 含躯干、上肢、下肢，覆盖完整人形骨架
+const BODY_BONE_MAP: Record<string, string> = {
   root: 'hips',
   spine: 'spine',
   chest: 'chest',
   neck: 'neck',
   head: 'head',
+  // 上肢：内部 shoulder/elbow/wrist 对应 VRM shoulder/upperArm/lowerArm
   left_shoulder: 'leftShoulder',
   left_elbow: 'leftUpperArm',
   left_wrist: 'leftLowerArm',
   right_shoulder: 'rightShoulder',
   right_elbow: 'rightUpperArm',
   right_wrist: 'rightLowerArm',
-  // 拇指：Metacarpal → Proximal → Distal（无 PIP）
-  left_thumb_cmc: 'leftThumbMetacarpal',
-  left_thumb_mcp: 'leftThumbProximal',
-  left_thumb_pip: 'leftThumbDistal',
-  left_index_mcp: 'leftIndexProximal',
-  left_index_pip: 'leftIndexIntermediate',
-  left_index_dip: 'leftIndexDistal',
-  left_middle_mcp: 'leftMiddleProximal',
-  left_middle_pip: 'leftMiddleIntermediate',
-  left_middle_dip: 'leftMiddleDistal',
-  left_ring_mcp: 'leftRingProximal',
-  left_ring_pip: 'leftRingIntermediate',
-  left_ring_dip: 'leftRingDistal',
-  left_pinky_mcp: 'leftLittleProximal',
-  left_pinky_pip: 'leftLittleIntermediate',
-  left_pinky_dip: 'leftLittleDistal',
-  right_thumb_cmc: 'rightThumbMetacarpal',
-  right_thumb_mcp: 'rightThumbProximal',
-  right_thumb_pip: 'rightThumbDistal',
-  right_index_mcp: 'rightIndexProximal',
-  right_index_pip: 'rightIndexIntermediate',
-  right_index_dip: 'rightIndexDistal',
-  right_middle_mcp: 'rightMiddleProximal',
-  right_middle_pip: 'rightMiddleIntermediate',
-  right_middle_dip: 'rightMiddleDistal',
-  right_ring_mcp: 'rightRingProximal',
-  right_ring_pip: 'rightRingIntermediate',
-  right_ring_dip: 'rightRingDistal',
-  right_pinky_mcp: 'rightLittleProximal',
-  right_pinky_pip: 'rightLittleIntermediate',
-  right_pinky_dip: 'rightLittleDistal',
+  // 下肢：内部 hip/knee/ankle 对应 VRM upperLeg/lowerLeg/foot
+  left_hip: 'leftUpperLeg',
+  left_knee: 'leftLowerLeg',
+  left_ankle: 'leftFoot',
+  right_hip: 'rightUpperLeg',
+  right_knee: 'rightLowerLeg',
+  right_ankle: 'rightFoot',
+};
+
+/**
+ * 手指骨骼映射：每只手 5 指 × 3 关节 = 15 个 VRM 骨骼
+ *
+ * 内部 HandShapeDefinition.fingers 顺序：[拇指, 食指, 中指, 无名指, 小指]
+ * 每根手指定义包含 mcp / pip / dip 三个屈曲角度
+ *
+ * VRM 拇指：Metacarpal / Proximal / Distal（无 PIP，3 节）
+ * VRM 其他手指：Proximal / Intermediate / Distal（3 节）
+ *
+ * 映射时将内部 (fingerIndex, joint) 对应到 VRM 骨骼：
+ *   - 拇指 cmc→Metacarpal, mcp→Proximal, pip→Distal（内部 dip 丢弃，因 VRM 仅 3 节）
+ *   - 其他 mcp→Proximal, pip→Intermediate, dip→Distal
+ */
+interface FingerJointMap {
+  vrm: string;
+  fingerIndex: number;
+  joint: 'mcp' | 'pip' | 'dip';
+}
+
+const FINGER_BONE_MAP: Record<'left' | 'right', FingerJointMap[]> = {
+  left: [
+    // 拇指（fingerIndex=0）
+    { vrm: 'leftThumbMetacarpal', fingerIndex: 0, joint: 'mcp' },
+    { vrm: 'leftThumbProximal', fingerIndex: 0, joint: 'pip' },
+    { vrm: 'leftThumbDistal', fingerIndex: 0, joint: 'dip' },
+    // 食指（fingerIndex=1）
+    { vrm: 'leftIndexProximal', fingerIndex: 1, joint: 'mcp' },
+    { vrm: 'leftIndexIntermediate', fingerIndex: 1, joint: 'pip' },
+    { vrm: 'leftIndexDistal', fingerIndex: 1, joint: 'dip' },
+    // 中指（fingerIndex=2）
+    { vrm: 'leftMiddleProximal', fingerIndex: 2, joint: 'mcp' },
+    { vrm: 'leftMiddleIntermediate', fingerIndex: 2, joint: 'pip' },
+    { vrm: 'leftMiddleDistal', fingerIndex: 2, joint: 'dip' },
+    // 无名指（fingerIndex=3）
+    { vrm: 'leftRingProximal', fingerIndex: 3, joint: 'mcp' },
+    { vrm: 'leftRingIntermediate', fingerIndex: 3, joint: 'pip' },
+    { vrm: 'leftRingDistal', fingerIndex: 3, joint: 'dip' },
+    // 小指（fingerIndex=4）
+    { vrm: 'leftLittleProximal', fingerIndex: 4, joint: 'mcp' },
+    { vrm: 'leftLittleIntermediate', fingerIndex: 4, joint: 'pip' },
+    { vrm: 'leftLittleDistal', fingerIndex: 4, joint: 'dip' },
+  ],
+  right: [
+    { vrm: 'rightThumbMetacarpal', fingerIndex: 0, joint: 'mcp' },
+    { vrm: 'rightThumbProximal', fingerIndex: 0, joint: 'pip' },
+    { vrm: 'rightThumbDistal', fingerIndex: 0, joint: 'dip' },
+    { vrm: 'rightIndexProximal', fingerIndex: 1, joint: 'mcp' },
+    { vrm: 'rightIndexIntermediate', fingerIndex: 1, joint: 'pip' },
+    { vrm: 'rightIndexDistal', fingerIndex: 1, joint: 'dip' },
+    { vrm: 'rightMiddleProximal', fingerIndex: 2, joint: 'mcp' },
+    { vrm: 'rightMiddleIntermediate', fingerIndex: 2, joint: 'pip' },
+    { vrm: 'rightMiddleDistal', fingerIndex: 2, joint: 'dip' },
+    { vrm: 'rightRingProximal', fingerIndex: 3, joint: 'mcp' },
+    { vrm: 'rightRingIntermediate', fingerIndex: 3, joint: 'pip' },
+    { vrm: 'rightRingDistal', fingerIndex: 3, joint: 'dip' },
+    { vrm: 'rightLittleProximal', fingerIndex: 4, joint: 'mcp' },
+    { vrm: 'rightLittleIntermediate', fingerIndex: 4, joint: 'pip' },
+    { vrm: 'rightLittleDistal', fingerIndex: 4, joint: 'dip' },
+  ],
 };
 
 // 表情映射：AvatarDriver FacialExpression → VRM expression preset
@@ -77,8 +121,26 @@ const EXPRESSION_MAP: Record<string, string> = {
   [FacialExpression.EMPHASIS]: 'angry',
 };
 
-function v3ToEuler(v: { x: number; y: number; z: number }) {
-  return new THREE.Euler(v.x, v.y, v.z, 'XYZ');
+/**
+ * 驱动单只手的手指骨骼
+ * 从 HandShape 查表获取角度，映射到 VRM 手指骨骼的 X 轴屈曲
+ */
+function driveHandFingers(
+  humanoid: VRM['humanoid'],
+  shape: HandShape,
+  side: 'left' | 'right',
+): void {
+  const def = getHandShapeDefinition(shape);
+  const mapping = FINGER_BONE_MAP[side];
+  for (const { vrm, fingerIndex, joint } of mapping) {
+    const fingerDef = def.fingers[fingerIndex];
+    if (!fingerDef) continue;
+    const angle = joint === 'mcp' ? fingerDef.mcp : joint === 'pip' ? fingerDef.pip : fingerDef.dip;
+    const boneNode = humanoid.getRawBoneNode(vrm as never);
+    if (!boneNode) continue;
+    // VRM 手指屈曲绕本地 X 轴；保留 Y/Z 为 0 避免侧偏
+    boneNode.rotation.set(angle, 0, 0);
+  }
 }
 
 /** VRMModel Props */
@@ -107,12 +169,14 @@ export function VRMModel({
   const isBlinkingRef = useRef(false);
   const blinkOpenRef = useRef(1);
   const headAnimTimeRef = useRef(0);
+  const smoother = useMemo(() => new BoneSmoother(1.5, 0.01), []);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // 更新 pose 引用
   useEffect(() => {
     poseRef.current = pose;
-  }, [pose]);
+    smoother.reset();
+  }, [pose, smoother]);
 
   // 异步加载 VRM
   useEffect(() => {
@@ -159,56 +223,41 @@ export function VRMModel({
   }, [modelUrl, onLoaded]);
 
   // 每帧驱动
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     const vrm = vrmRef.current;
     if (!vrm || !isLoaded) return;
 
     const currentPose = poseRef.current;
     const humanoid = vrm.humanoid;
+    const timestamp = state.clock.elapsedTime * 1000;
     headAnimTimeRef.current += delta;
 
-    // 身体骨骼驱动
-    for (const [internalName, vrmBoneName] of Object.entries(INTERNAL_TO_VRM_BONE)) {
-      if (
-        internalName.includes('mcp') ||
-        internalName.includes('pip') ||
-        internalName.includes('dip')
-      ) {
-        // 手指骨骼
-        const boneNode = humanoid.getRawBoneNode(vrmBoneName as any);
-        if (!boneNode) continue;
-        const poseBone = currentPose[internalName as keyof BonePose] as
-          | { rotation?: { x: number; y: number; z: number } }
-          | undefined;
-        if (poseBone?.rotation) {
-          boneNode.rotation.set(poseBone.rotation.x, 0, 0);
-        }
-      } else if (internalName === 'head' || internalName === 'neck') {
-        // 头部和颈部骨骼，稍后叠加 head_movement 动画
-        const boneNode = humanoid.getRawBoneNode(vrmBoneName as any);
-        if (!boneNode) continue;
-        const poseBone = currentPose[internalName as keyof BonePose] as
-          | { rotation?: { x: number; y: number; z: number } }
-          | undefined;
-        if (poseBone?.rotation) {
-          boneNode.rotation.copy(v3ToEuler(poseBone.rotation));
-        }
-      } else {
-        // 其他身体骨骼
-        const boneNode = humanoid.getRawBoneNode(vrmBoneName as any);
-        if (!boneNode) continue;
-        const poseBone = currentPose[internalName as keyof BonePose] as
-          | { rotation?: { x: number; y: number; z: number } }
-          | undefined;
-        if (poseBone?.rotation) {
-          boneNode.rotation.copy(v3ToEuler(poseBone.rotation));
-        }
-      }
+    // ===== 身体骨骼驱动（含重定向 + 平滑滤波）=====
+    // 顺序：先下肢→躯干→头→上肢，遵循骨骼层级，避免父级旋转影响子级世界变换计算
+    for (const [internalName, vrmBoneName] of Object.entries(BODY_BONE_MAP)) {
+      const boneNode = humanoid.getRawBoneNode(vrmBoneName as never);
+      if (!boneNode) continue;
+      const poseBone = currentPose[internalName as keyof BonePose] as
+        | { rotation?: { x: number; y: number; z: number } }
+        | undefined;
+      if (!poseBone?.rotation) continue;
+
+      // 1. 重定向：补偿 T-pose（VRM）与 A-pose（内部 IK）的 rest pose 差异
+      //    主要是肩部，T-pose 双臂水平外展，A-pose 双臂下垂
+      const retargeted = retargetRotation(vrmBoneName, poseBone.rotation);
+      // 2. 平滑：One-Euro Filter 抑制帧间抖动
+      const smoothed = smoother.smooth(vrmBoneName, retargeted, timestamp);
+      boneNode.rotation.set(smoothed.x, smoothed.y, smoothed.z);
     }
 
-    // 头部运动驱动（叠加到 head/neck 骨骼）
-    const headBone = humanoid.getRawBoneNode('head' as any);
-    const neckBone = humanoid.getRawBoneNode('neck' as any);
+    // ===== 手指骨骼驱动（从 HandShape 查表）=====
+    // 不再引用 BonePose 中不存在的 left_thumb_mcp 等字段
+    driveHandFingers(humanoid, currentPose.left_hand.shape, 'left');
+    driveHandFingers(humanoid, currentPose.right_hand.shape, 'right');
+
+    // ===== 头部运动叠加 =====
+    const headBone = humanoid.getRawBoneNode('head' as never);
+    const neckBone = humanoid.getRawBoneNode('neck' as never);
     const poseHead = currentPose.head;
     const baseRotX = poseHead?.rotation?.x ?? 0;
     const baseRotY = poseHead?.rotation?.y ?? 0;
@@ -248,7 +297,7 @@ export function VRMModel({
       neckBone.rotation.z = baseRotZ + headOffsetZ * 0.4;
     }
 
-    // 表情驱动
+    // ===== 表情驱动 =====
     const mgr = vrm.expressionManager;
     if (mgr) {
       const expr = EXPRESSION_MAP[currentPose.expression] ?? 'neutral';
@@ -283,7 +332,7 @@ export function VRMModel({
       mgr.setValue('blinkRight', 1 - blinkOpenRef.current);
     }
 
-    // 注视跟踪
+    // ===== 注视跟踪 =====
     if (lookAtTarget && vrm.lookAt) {
       vrm.lookAt.lookAt(lookAtTarget);
     }
