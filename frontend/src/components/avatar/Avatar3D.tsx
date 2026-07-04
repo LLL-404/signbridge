@@ -1,6 +1,6 @@
 // 3D 虚拟人 React 组件
 import { useRef, useMemo, useEffect, Suspense, type CSSProperties, lazy } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { BonePose } from '@/types/avatar';
@@ -32,6 +32,20 @@ export interface Avatar3DProps {
   modelUrl?: string;
   /** VRM 模式加载完成回调 */
   onVRMLoaded?: (vrm: unknown) => void;
+}
+
+/** 根据容器宽高比动态调整相机，确保模型在不同设备上显示一致 */
+function ResponsiveCamera() {
+  const { camera, size } = useThree();
+  useEffect(() => {
+    const aspect = size.width / size.height;
+    // 竖屏（宽高比 < 1）时拉远相机，确保模型完整显示
+    const baseDistance = 2.5;
+    const distance = aspect < 1 ? baseDistance / aspect * 0.85 : baseDistance;
+    camera.position.set(0, 0.3, distance);
+    camera.updateProjectionMatrix();
+  }, [camera, size.width, size.height]);
+  return null;
 }
 
 /** 骨架模式内部渲染组件 */
@@ -113,6 +127,9 @@ export default function Avatar3D({
         style={{ width: '100%', height: '100%' }}
         gl={{ antialias: true, alpha: false }}
       >
+        {/* 响应式相机：根据宽高比自动调整 */}
+        <ResponsiveCamera />
+
         {/* 雾效 */}
         <fog attach="fog" args={['#0a0a0f', 3, 8]} />
 
