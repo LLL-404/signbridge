@@ -108,8 +108,10 @@ export default function Avatar3D({
     >
       <Canvas
         shadows
-        camera={{ position: [0, 0.3, 2.5], fov: 45 }}
+        dpr={[1, 2]}
+        camera={{ position: [0, 0.3, 2.5], fov: 45, near: 0.1, far: 50 }}
         style={{ width: '100%', height: '100%' }}
+        gl={{ antialias: true, alpha: false }}
       >
         {/* 雾效 */}
         <fog attach="fog" args={['#0a0a0f', 3, 8]} />

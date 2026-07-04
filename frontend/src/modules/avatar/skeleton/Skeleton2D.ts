@@ -6,7 +6,7 @@ import { HandShape, FacialExpression, HeadMovement } from '@/types/sign';
 function project(pos: Vec3, centerX: number, centerY: number, scale: number): { x: number; y: number } {
   return {
     x: centerX + pos.x * scale,
-    y: centerY - pos.y * scale, // Y 轴翻转（画布 Y 向下）
+    y: centerY - pos.y * scale,
   };
 }
 
@@ -58,29 +58,32 @@ export class Skeleton2D {
   /** 渲染一帧 */
   render(pose: BonePose): void {
     const ctx = this.ctx;
-    const cx = this.width / 2;
-    const cy = this.height * 0.55;
-    const scale = this.height * 0.35; // 缩放因子
+    const w = this.width;
+    const h = this.height;
 
-    ctx.clearRect(0, 0, this.width, this.height);
+    // 3D 坐标范围：y 从 0.0（脚底）到 1.72（头顶）
+    // 投影映射：让脚底贴画布底部（留 5% 边距），头顶贴画布顶部（留 5% 边距）
+    const padding = h * 0.06;
+    const worldTop = 1.75;
+    const worldBottom = 0.0;
+    const worldRange = worldTop - worldBottom;
+    const scale = (h - padding * 2) / worldRange;
+    const cx = w / 2;
+    // y_screen = cy - pos.y * scale; 当 pos.y = worldBottom 时，y_screen = h - padding
+    const cy = h - padding + worldBottom * scale;
+
+    ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = '#1e293b';
-    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.fillRect(0, 0, w, h);
 
-    // 计算各关节 2D 位置（基于姿态中的位置偏移叠加中性姿态基准）
     const joints = this.computeJoints(pose, cx, cy, scale);
 
-    // 绘制身体
-    this.drawBody(joints);
-    // 绘制左臂
-    this.drawArm(joints, 'left');
-    // 绘制右臂
-    this.drawArm(joints, 'right');
-    // 绘制左手
-    this.drawHand(joints, 'left', pose.left_hand);
-    // 绘制右手
-    this.drawHand(joints, 'right', pose.right_hand);
-    // 绘制头部（含表情）
-    this.drawHead(joints, pose.expression, pose.head_movement);
+    this.drawBody(joints, scale);
+    this.drawArm(joints, 'left', scale);
+    this.drawArm(joints, 'right', scale);
+    this.drawHand(joints, 'left', pose.left_hand, scale);
+    this.drawHand(joints, 'right', pose.right_hand, scale);
+    this.drawHead(joints, pose.expression, pose.head_movement, scale);
   }
 
   /** 计算各关节的 2D 位置 */
@@ -100,20 +103,19 @@ export class Skeleton2D {
   }
 
   /** 绘制躯干 */
-  private drawBody(j: ReturnType<Skeleton2D['computeJoints']>): void {
+  private drawBody(j: ReturnType<Skeleton2D['computeJoints']>, scale: number): void {
     const ctx = this.ctx;
+    const lw = Math.max(2, scale * 0.05);
     ctx.strokeStyle = '#4a90d9';
-    ctx.lineWidth = 8;
+    ctx.lineWidth = lw;
     ctx.lineCap = 'round';
 
-    // 脊柱
     ctx.beginPath();
     ctx.moveTo(j.spine.x, j.spine.y);
     ctx.lineTo(j.chest.x, j.chest.y);
     ctx.lineTo(j.neck.x, j.neck.y);
     ctx.stroke();
 
-    // 肩部连线
     ctx.beginPath();
     ctx.moveTo(j.leftShoulder.x, j.leftShoulder.y);
     ctx.lineTo(j.rightShoulder.x, j.rightShoulder.y);
@@ -121,10 +123,12 @@ export class Skeleton2D {
   }
 
   /** 绘制手臂 */
-  private drawArm(j: ReturnType<Skeleton2D['computeJoints']>, side: 'left' | 'right'): void {
+  private drawArm(j: ReturnType<Skeleton2D['computeJoints']>, side: 'left' | 'right', scale: number): void {
     const ctx = this.ctx;
+    const lw = Math.max(1.5, scale * 0.04);
+    const jointR = Math.max(2, scale * 0.025);
     ctx.strokeStyle = '#5a9ee0';
-    ctx.lineWidth = 6;
+    ctx.lineWidth = lw;
     ctx.lineCap = 'round';
 
     const shoulder = side === 'left' ? j.leftShoulder : j.rightShoulder;
@@ -137,29 +141,34 @@ export class Skeleton2D {
     ctx.lineTo(wrist.x, wrist.y);
     ctx.stroke();
 
-    // 关节点
     ctx.fillStyle = '#6ab0e8';
     ctx.beginPath();
-    ctx.arc(elbow.x, elbow.y, 4, 0, Math.PI * 2);
+    ctx.arc(elbow.x, elbow.y, jointR, 0, Math.PI * 2);
     ctx.fill();
   }
 
   /** 绘制手部（手掌+手指） */
-  private drawHand(j: ReturnType<Skeleton2D['computeJoints']>, side: 'left' | 'right', hand: HandPose): void {
+  private drawHand(
+    j: ReturnType<Skeleton2D['computeJoints']>,
+    side: 'left' | 'right',
+    hand: HandPose,
+    scale: number,
+  ): void {
     const ctx = this.ctx;
     const wrist = side === 'left' ? j.leftWrist : j.rightWrist;
-    const scale = this.height * 0.35;
     const angles = HAND_SHAPE_ANGLES[hand.shape] ?? HAND_SHAPE_ANGLES[HandShape.OPEN_5];
+    const palmRx = scale * 0.05;
+    const palmRy = scale * 0.04;
+    const fingerLw = Math.max(1, scale * 0.018);
+    const tipR = Math.max(1.2, scale * 0.015);
 
-    // 手掌
     ctx.fillStyle = '#6ab0e8';
     ctx.beginPath();
-    ctx.ellipse(wrist.x, wrist.y - 3, 8, 6, 0, 0, Math.PI * 2);
+    ctx.ellipse(wrist.x, wrist.y - palmRy * 0.5, palmRx, palmRy, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 手指
     ctx.strokeStyle = '#6ab0e8';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = fingerLw;
     ctx.lineCap = 'round';
 
     for (let fi = 0; fi < FINGER_NAMES.length; fi++) {
@@ -168,24 +177,19 @@ export class Skeleton2D {
       const lengths = FINGER_LENGTHS[fingerName];
       const palmDir = side === 'left' ? -1 : 1;
 
-      // 手指根部位置（相对于手腕）
       let px = wrist.x + root.x * scale * palmDir;
       let py = wrist.y - root.y * scale;
 
       ctx.beginPath();
       ctx.moveTo(px, py);
 
-      // P1 修复：正确的 2D 旋转变换
-      // 累积弯曲角度，每次屈曲绕当前指节根部旋转
-      // 注意：初始方向为向上（垂直向上），屈曲时绕 Z 轴（垂直屏幕向内）顺时针旋转
       let cumulativeAngle = 0;
       for (let ji = 0; ji < 3; ji++) {
         cumulativeAngle += angles[fi * 3 + ji];
-        // 正确的 2D 旋转：初始方向向量 (0, -1)，旋转后：
         const cosA = Math.cos(cumulativeAngle);
         const sinA = Math.sin(cumulativeAngle);
-        const rotDirX = -sinA;  // = cos*0 - sin*(-1) = sin
-        const rotDirY = -cosA; // = sin*0 + cos*(-1) = -cos
+        const rotDirX = -sinA;
+        const rotDirY = -cosA;
 
         const segLen = lengths[ji] * scale;
         px += rotDirX * segLen;
@@ -194,77 +198,79 @@ export class Skeleton2D {
       }
       ctx.stroke();
 
-      // 指尖圆点
       ctx.fillStyle = '#7ac0f0';
       ctx.beginPath();
-      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.arc(px, py, tipR, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
   /** 绘制头部（含面部表情） */
-  private drawHead(j: ReturnType<Skeleton2D['computeJoints']>, expression: FacialExpression, headMovement: HeadMovement): void {
+  private drawHead(
+    j: ReturnType<Skeleton2D['computeJoints']>,
+    expression: FacialExpression,
+    headMovement: HeadMovement,
+    scale: number,
+  ): void {
     const ctx = this.ctx;
-    const headRadius = 18;
+    const headRadius = scale * 0.11;
+    const featScale = headRadius / 18;
 
-    // 头部旋转偏移
     let headOffsetX = 0;
-    if (headMovement === HeadMovement.TILT_LEFT) headOffsetX = -3;
-    if (headMovement === HeadMovement.TILT_RIGHT) headOffsetX = 3;
+    if (headMovement === HeadMovement.TILT_LEFT) headOffsetX = -headRadius * 0.17;
+    if (headMovement === HeadMovement.TILT_RIGHT) headOffsetX = headRadius * 0.17;
 
-    // 头部
     ctx.fillStyle = '#4a90d9';
     ctx.beginPath();
     ctx.arc(j.head.x + headOffsetX, j.head.y, headRadius, 0, Math.PI * 2);
     ctx.fill();
 
-    // 面部表情
     const ex = j.head.x + headOffsetX;
     const ey = j.head.y;
 
     ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = Math.max(1, 2 * featScale);
 
-    // 眼睛
-    const eyeY = ey - 3;
+    const eyeY = ey - headRadius * 0.17;
+    const eyeOffset = headRadius * 0.33;
+    const eyeR = headRadius * 0.17;
+    const eyeSmallR = headRadius * 0.11;
     if (expression === FacialExpression.HAPPY || expression === FacialExpression.QUESTION) {
-      // 弯眼（笑眼/挑眉）
       ctx.beginPath();
-      ctx.arc(ex - 6, eyeY, 3, Math.PI, 0, false);
-      ctx.arc(ex + 6, eyeY, 3, Math.PI, 0, false);
+      ctx.arc(ex - eyeOffset, eyeY, eyeR, Math.PI, 0, false);
+      ctx.arc(ex + eyeOffset, eyeY, eyeR, Math.PI, 0, false);
       ctx.stroke();
     } else if (expression === FacialExpression.ANGRY || expression === FacialExpression.NEGATIVE) {
-      // 皱眉（斜线眼）
       ctx.beginPath();
-      ctx.moveTo(ex - 8, eyeY - 2);
-      ctx.lineTo(ex - 4, eyeY + 1);
-      ctx.moveTo(ex + 4, eyeY + 1);
-      ctx.lineTo(ex + 8, eyeY - 2);
+      ctx.moveTo(ex - eyeOffset - headRadius * 0.11, eyeY - headRadius * 0.11);
+      ctx.lineTo(ex - eyeOffset + headRadius * 0.11, eyeY + headRadius * 0.06);
+      ctx.moveTo(ex + eyeOffset - headRadius * 0.11, eyeY + headRadius * 0.06);
+      ctx.lineTo(ex + eyeOffset + headRadius * 0.11, eyeY - headRadius * 0.11);
       ctx.stroke();
     } else {
-      // 正常圆眼
       ctx.fillStyle = '#1e293b';
       ctx.beginPath();
-      ctx.arc(ex - 6, eyeY, 2, 0, Math.PI * 2);
-      ctx.arc(ex + 6, eyeY, 2, 0, Math.PI * 2);
+      ctx.arc(ex - eyeOffset, eyeY, eyeSmallR, 0, Math.PI * 2);
+      ctx.arc(ex + eyeOffset, eyeY, eyeSmallR, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // 嘴巴
-    const mouthY = ey + 6;
+    const mouthY = ey + headRadius * 0.33;
+    const mouthR = headRadius * 0.28;
+    const mouthSmallR = headRadius * 0.17;
     ctx.beginPath();
     if (expression === FacialExpression.HAPPY) {
-      ctx.arc(ex, mouthY - 2, 5, 0, Math.PI, false);
+      ctx.arc(ex, mouthY - headRadius * 0.11, mouthR, 0, Math.PI, false);
     } else if (expression === FacialExpression.SAD) {
-      ctx.arc(ex, mouthY + 3, 5, Math.PI, 0, false);
+      ctx.arc(ex, mouthY + headRadius * 0.17, mouthR, Math.PI, 0, false);
     } else if (expression === FacialExpression.QUESTION || expression === FacialExpression.SURPRISED) {
-      ctx.arc(ex, mouthY, 3, 0, Math.PI * 2);
+      ctx.arc(ex, mouthY, mouthSmallR, 0, Math.PI * 2);
     } else if (expression === FacialExpression.NEGATIVE) {
-      ctx.moveTo(ex - 5, mouthY + 1);
-      ctx.lineTo(ex + 5, mouthY - 1);
+      ctx.moveTo(ex - mouthR, mouthY + headRadius * 0.06);
+      ctx.lineTo(ex + mouthR, mouthY - headRadius * 0.06);
     } else {
-      ctx.moveTo(ex - 5, mouthY);
-      ctx.lineTo(ex + 5, mouthY);
+      ctx.moveTo(ex - mouthR, mouthY);
+      ctx.lineTo(ex + mouthR, mouthY);
     }
     ctx.stroke();
   }
