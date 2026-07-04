@@ -108,18 +108,20 @@ export function solve(
   const invShoulder = shoulderQuat.clone().invert();
   const forearmLocalDir = forearmDir.clone().applyQuaternion(invShoulder);
 
-  // 肘部铰链：主要绕 X 轴弯曲。弯曲方向由我们的 elbowDir 决定。
-  // 为保证正确的弯曲方向，使用 setFromUnitVectors 再次求精确旋转，再提取 X 分量作为主弯曲；
-  // 这里直接用四元数求完整旋转，可避免符号错误，但对铰链关节只保留 X 轴（防止扭转）。
-  const elbowQuat = new THREE.Quaternion().setFromUnitVectors(
-    BONE_REST_DIR,
-    forearmLocalDir,
-  );
-  const elbowEuler = new THREE.Euler().setFromQuaternion(elbowQuat, 'XYZ');
+  // 肘部铰链修正：用点积直接计算弯曲角，避免欧拉分解误差。
+  // rest 方向 (0,-1,0) 与 forearmLocalDir 的夹角就是肘部屈曲角，
+  // 用 acos(clamp(dot, -1, 1)) 精确求值，符号由叉积 Y 分量决定方向。
+  const dot = BONE_REST_DIR.dot(forearmLocalDir);
+  const clampedDot = Math.max(-1, Math.min(1, dot));
+  let elbowAngle = Math.acos(clampedDot);
+
+  // 叉积判断弯曲方向：叉积 Y > 0 表示正方向弯曲（屈曲），< 0 表示反方向（过伸）
+  const cross = new THREE.Vector3().crossVectors(BONE_REST_DIR, forearmLocalDir);
+  if (cross.y < 0) elbowAngle = -elbowAngle;
 
   return {
     shoulderRotation: { x: shoulderEuler.x, y: shoulderEuler.y, z: shoulderEuler.z },
     // 肘部作为铰链只保留 X 轴（主弯曲方向），Y/Z 设 0 以避免异常扭转
-    elbowRotation: { x: elbowEuler.x, y: 0, z: 0 },
+    elbowRotation: { x: elbowAngle, y: 0, z: 0 },
   };
 }

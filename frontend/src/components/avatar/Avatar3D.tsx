@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import type { BonePose } from '@/types/avatar';
 import { NEUTRAL_POSE } from '@/types/avatar';
 import { Skeleton3D } from '@/modules/avatar/skeleton/Skeleton3D';
+import { BoneSmoother } from '@/modules/avatar/Smoother';
 
 /** Avatar3D 渲染模式 */
 export type AvatarMode = 'skeleton' | 'vrm';
@@ -53,6 +54,9 @@ function SkeletonAvatarModel({ pose }: { pose: BonePose }) {
   const groupRef = useRef<THREE.Group>(null);
   const skeleton = useMemo(() => new Skeleton3D(), []);
   const currentPoseRef = useRef<BonePose>(pose);
+  const smoother = useMemo(() => new BoneSmoother(1.5, 0.01), []);
+  const lastPoseRef = useRef<BonePose>(NEUTRAL_POSE);
+  const blendRef = useRef(0);
 
   useEffect(() => {
     if (groupRef.current) {
@@ -69,11 +73,51 @@ function SkeletonAvatarModel({ pose }: { pose: BonePose }) {
   }, [skeleton]);
 
   useEffect(() => {
+    // pose 变化时重置平滑器，避免过渡延迟
+    smoother.reset();
     currentPoseRef.current = pose;
-  }, [pose]);
+  }, [pose, smoother]);
 
   useFrame((state) => {
-    skeleton.applyPose(currentPoseRef.current);
+    const targetPose = currentPoseRef.current;
+    const timestamp = state.clock.elapsedTime * 1000;
+
+    // 对关键关节做 One-Euro 滤波平滑
+    const smoothedPose: BonePose = { ...targetPose };
+    const jointsToSmooth = [
+      'left_shoulder', 'left_elbow', 'left_wrist',
+      'right_shoulder', 'right_elbow', 'right_wrist',
+      'neck', 'head', 'spine', 'chest',
+    ] as const;
+
+    for (const joint of jointsToSmooth) {
+      const j = targetPose[joint];
+      const smoothedRot = smoother.smooth(joint, j.rotation, timestamp);
+      smoothedPose[joint] = { ...j, rotation: smoothedRot };
+    }
+
+    // 渲染层 lerp 插值：从上一帧姿态平滑过渡到目标姿态
+    blendRef.current = Math.min(1, blendRef.current + 0.15);
+    const blend = blendRef.current;
+    const lerpedPose = { ...smoothedPose };
+    for (const joint of jointsToSmooth) {
+      const target = smoothedPose[joint];
+      const last = lastPoseRef.current[joint];
+      lerpedPose[joint] = {
+        position: target.position,
+        rotation: {
+          x: last.rotation.x + (target.rotation.x - last.rotation.x) * blend,
+          y: last.rotation.y + (target.rotation.y - last.rotation.y) * blend,
+          z: last.rotation.z + (target.rotation.z - last.rotation.z) * blend,
+        },
+      };
+    }
+    if (blend >= 1) {
+      lastPoseRef.current = smoothedPose;
+      blendRef.current = 0;
+    }
+
+    skeleton.applyPose(lerpedPose);
     if (groupRef.current) {
       const t = state.clock.elapsedTime;
       groupRef.current.position.y = Math.sin(t * Math.PI * 2 * 0.5) * 0.005;
