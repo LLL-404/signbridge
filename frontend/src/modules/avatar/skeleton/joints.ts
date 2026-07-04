@@ -14,6 +14,12 @@ export const JOINT_NAMES = {
   RIGHT_SHOULDER: 'right_shoulder',
   RIGHT_ELBOW: 'right_elbow',
   RIGHT_WRIST: 'right_wrist',
+  LEFT_HIP: 'left_hip',
+  LEFT_KNEE: 'left_knee',
+  LEFT_ANKLE: 'left_ankle',
+  RIGHT_HIP: 'right_hip',
+  RIGHT_KNEE: 'right_knee',
+  RIGHT_ANKLE: 'right_ankle',
 } as const;
 
 /** 手指关节名称前缀 */
@@ -50,15 +56,22 @@ export const JOINT_CONSTRAINTS: JointConstraint[] = [
   // 脊柱
   { joint: 'spine', min_rotation: { x: deg(-30), y: deg(-30), z: deg(-20) }, max_rotation: { x: deg(30), y: deg(30), z: deg(20) } },
   { joint: 'chest', min_rotation: { x: deg(-20), y: deg(-20), z: deg(-15) }, max_rotation: { x: deg(20), y: deg(20), z: deg(15) } },
-  // 肩部
+  // 肩部（3 自由度：前屈/后伸、内旋/外旋、外展/内收）
   { joint: 'left_shoulder', min_rotation: { x: deg(-180), y: deg(-90), z: deg(-120) }, max_rotation: { x: deg(60), y: deg(90), z: deg(45) } },
   { joint: 'right_shoulder', min_rotation: { x: deg(-180), y: deg(-90), z: deg(-45) }, max_rotation: { x: deg(60), y: deg(90), z: deg(120) } },
-  // 肘部（只能屈伸）
-  { joint: 'left_elbow', min_rotation: { x: deg(0), y: deg(0), z: deg(0) }, max_rotation: { x: deg(150), y: deg(0), z: deg(0) } },
-  { joint: 'right_elbow', min_rotation: { x: deg(0), y: deg(0), z: deg(0) }, max_rotation: { x: deg(150), y: deg(0), z: deg(0) } },
+  // 肘部（铰链：负 X 为向前弯曲，正 X 为过伸）
+  { joint: 'left_elbow', min_rotation: { x: deg(-155), y: deg(-10), z: deg(-10) }, max_rotation: { x: deg(5), y: deg(10), z: deg(10) } },
+  { joint: 'right_elbow', min_rotation: { x: deg(-155), y: deg(-10), z: deg(-10) }, max_rotation: { x: deg(5), y: deg(10), z: deg(10) } },
   // 手腕
   { joint: 'left_wrist', min_rotation: { x: deg(-80), y: deg(-20), z: deg(-30) }, max_rotation: { x: deg(80), y: deg(20), z: deg(30) } },
   { joint: 'right_wrist', min_rotation: { x: deg(-80), y: deg(-20), z: deg(-30) }, max_rotation: { x: deg(80), y: deg(20), z: deg(30) } },
+  // 髋部（站立时下半身基本固定）
+  { joint: 'left_hip', min_rotation: { x: deg(-5), y: deg(-5), z: deg(-5) }, max_rotation: { x: deg(5), y: deg(5), z: deg(5) } },
+  { joint: 'right_hip', min_rotation: { x: deg(-5), y: deg(-5), z: deg(-5) }, max_rotation: { x: deg(5), y: deg(5), z: deg(5) } },
+  { joint: 'left_knee', min_rotation: { x: deg(-5), y: deg(-5), z: deg(-5) }, max_rotation: { x: deg(5), y: deg(5), z: deg(5) } },
+  { joint: 'right_knee', min_rotation: { x: deg(-5), y: deg(-5), z: deg(-5) }, max_rotation: { x: deg(5), y: deg(5), z: deg(5) } },
+  { joint: 'left_ankle', min_rotation: { x: deg(-5), y: deg(-5), z: deg(-5) }, max_rotation: { x: deg(5), y: deg(5), z: deg(5) } },
+  { joint: 'right_ankle', min_rotation: { x: deg(-5), y: deg(-5), z: deg(-5) }, max_rotation: { x: deg(5), y: deg(5), z: deg(5) } },
 ];
 
 /** 手指关节约束 */

@@ -25,6 +25,8 @@ const BODY_JOINT_KEYS = [
   'root', 'spine', 'chest', 'neck', 'head',
   'left_shoulder', 'left_elbow', 'left_wrist',
   'right_shoulder', 'right_elbow', 'right_wrist',
+  'left_hip', 'left_knee', 'left_ankle',
+  'right_hip', 'right_knee', 'right_ankle',
 ] as const;
 
 // ===== 缓动函数 =====
@@ -231,14 +233,12 @@ export function clampJointAngles(pose: BonePose): BonePose {
 // ===== IK 修正 =====
 
 /** 从 NEUTRAL_POSE 计算上臂/前臂长度
- *  P2 修复：使用 Skeleton3D 的实际骨骼长度
- *  - 上臂（肩→肘）：0.28（Skeleton3D left_shoulder→left_elbow）
- *  - 前臂（肘→腕）：0.28（与上臂等长，符合人体比例）
- *    注意：Skeleton3D 中 wrist 相对肘部 local position 为 0，
- *    但渲染网格长度为 0.28，本实现使用 0.28 保证 IK 有正确的弯曲能力 */
+ *  与 Skeleton3D.LIMB 保持一致：
+ *   - 上臂（肩→肘）：0.30
+ *   - 前臂（肘→腕）：0.28
+ */
 function computeArmLengths(): { upperArm: number; forearm: number } {
-  // 使用固定值与 Skeleton3D 渲染臂长一致
-  return { upperArm: 0.28, forearm: 0.28 };
+  return { upperArm: 0.30, forearm: 0.28 };
 }
 
 const ARM_LENGTHS = computeArmLengths();
@@ -255,6 +255,7 @@ export function applyIKCorrection(pose: BonePose): BonePose {
     pose.left_wrist.position,
     ARM_LENGTHS.upperArm,
     ARM_LENGTHS.forearm,
+    'left',
   );
   // 右臂 IK
   const rightIK = ikSolve(
@@ -262,6 +263,7 @@ export function applyIKCorrection(pose: BonePose): BonePose {
     pose.right_wrist.position,
     ARM_LENGTHS.upperArm,
     ARM_LENGTHS.forearm,
+    'right',
   );
 
   return {

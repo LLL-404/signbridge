@@ -26,23 +26,30 @@ const BODY_JOINT_KEYS = [
   'root', 'spine', 'chest', 'neck', 'head',
   'left_shoulder', 'left_elbow', 'left_wrist',
   'right_shoulder', 'right_elbow', 'right_wrist',
+  'left_hip', 'left_knee', 'left_ankle',
+  'right_hip', 'right_knee', 'right_ankle',
 ] as const;
 
-/** HandLocation → 3D 位置映射（基于身体坐标，Y 轴向上） */
+/**
+ * HandLocation → 3D 位置映射（世界坐标，Y 轴向上，与 Skeleton3D FK 一致）
+ *   hips y=1.0, waist≈1.0, abdomen≈1.15, chest y=1.42, shoulder y=1.40,
+ *   neck y=1.50, chin≈1.46, mouth≈1.52, nose≈1.56, eye≈1.60, forehead≈1.66,
+ *   手臂自然下垂 wrist y≈0.82，中性手位腹部前方 y≈0.95 z≈0.15
+ */
 const LOCATION_POSITIONS: Record<HandLocation, Vec3> = {
-  [HandLocation.NEUTRAL]: { x: 0, y: 0.9, z: 0 },
-  [HandLocation.CHEST_CENTER]: { x: 0, y: 1.3, z: 0.1 },
-  [HandLocation.CHEST_LEFT]: { x: -0.15, y: 1.3, z: 0.1 },
-  [HandLocation.CHEST_RIGHT]: { x: 0.15, y: 1.3, z: 0.1 },
-  [HandLocation.SHOULDER_LEFT]: { x: -0.2, y: 1.45, z: 0 },
-  [HandLocation.SHOULDER_RIGHT]: { x: 0.2, y: 1.45, z: 0 },
-  [HandLocation.FACE_LEVEL]: { x: 0, y: 1.65, z: 0.15 },
-  [HandLocation.EYE_LEVEL]: { x: 0, y: 1.7, z: 0.15 },
-  [HandLocation.MOUTH_LEVEL]: { x: 0, y: 1.55, z: 0.15 },
-  [HandLocation.CHIN_LEVEL]: { x: 0, y: 1.5, z: 0.15 },
-  [HandLocation.FOREHEAD_LEVEL]: { x: 0, y: 1.75, z: 0.15 },
-  [HandLocation.ABDOMEN_LEVEL]: { x: 0, y: 1.0, z: 0.1 },
-  [HandLocation.WAIST_LEVEL]: { x: 0, y: 0.85, z: 0.1 },
+  [HandLocation.NEUTRAL]: { x: 0, y: 0.95, z: 0.15 },
+  [HandLocation.CHEST_CENTER]: { x: 0, y: 1.35, z: 0.12 },
+  [HandLocation.CHEST_LEFT]: { x: -0.18, y: 1.35, z: 0.12 },
+  [HandLocation.CHEST_RIGHT]: { x: 0.18, y: 1.35, z: 0.12 },
+  [HandLocation.SHOULDER_LEFT]: { x: -0.22, y: 1.40, z: 0 },
+  [HandLocation.SHOULDER_RIGHT]: { x: 0.22, y: 1.40, z: 0 },
+  [HandLocation.FACE_LEVEL]: { x: 0, y: 1.52, z: 0.18 },
+  [HandLocation.EYE_LEVEL]: { x: 0, y: 1.58, z: 0.18 },
+  [HandLocation.MOUTH_LEVEL]: { x: 0, y: 1.50, z: 0.18 },
+  [HandLocation.CHIN_LEVEL]: { x: 0, y: 1.45, z: 0.15 },
+  [HandLocation.FOREHEAD_LEVEL]: { x: 0, y: 1.65, z: 0.18 },
+  [HandLocation.ABDOMEN_LEVEL]: { x: 0, y: 1.15, z: 0.10 },
+  [HandLocation.WAIST_LEVEL]: { x: 0, y: 1.00, z: 0.10 },
 };
 
 /** 默认动作时长（毫秒） */
@@ -82,7 +89,7 @@ function parseHeadMovement(s: string): HeadMovement {
 function getLocationPosition(location: HandLocation, dominantHand: 'left' | 'right'): Vec3 {
   const base = LOCATION_POSITIONS[location] ?? LOCATION_POSITIONS[HandLocation.NEUTRAL];
   if (location === HandLocation.NEUTRAL) {
-    return { x: dominantHand === 'left' ? -0.25 : 0.25, y: base.y, z: base.z };
+    return { x: dominantHand === 'left' ? -0.20 : 0.20, y: base.y, z: base.z };
   }
   return { ...base };
 }

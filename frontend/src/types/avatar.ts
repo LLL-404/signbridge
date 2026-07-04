@@ -36,6 +36,12 @@ export interface BonePose {
   right_shoulder: JointPose;
   right_elbow: JointPose;
   right_wrist: JointPose;
+  left_hip: JointPose;
+  left_knee: JointPose;
+  left_ankle: JointPose;
+  right_hip: JointPose;
+  right_knee: JointPose;
+  right_ankle: JointPose;
   left_hand: HandPose;
   right_hand: HandPose;
   expression: FacialExpression;
@@ -95,37 +101,41 @@ const jointAt = (x: number, y: number, z: number): JointPose => ({
   rotation: { x: 0, y: 0, z: 0 },
 });
 
-/** 创建中性手部姿态（自然张开 5 指手形，位于身体两侧中性位置） */
+/** 创建中性手部姿态（自然张开 5 指手形，双臂自然下垂） */
 const neutralHand = (side: 'left' | 'right'): HandPose => ({
   shape: HandShape.OPEN_5,
   location: HandLocation.NEUTRAL,
   palm_orientation: 'inward',
-  wrist: jointAt(side === 'left' ? -0.25 : 0.25, 0.9, 0),
+  wrist: jointAt(side === 'left' ? -0.18 : 0.18, 0.82, 0),
   fingers: [zeroJoint(), zeroJoint(), zeroJoint(), zeroJoint(), zeroJoint()],
 });
 
 /**
  * 中性姿态（准备位）
- * 虚拟人直立站姿：根节点位于原点，脊柱垂直向上，双臂自然下垂
- * 坐标约定：Y 轴向上，Z 轴朝向观察者，X 轴向右
- * P2 修复：调整臂长使 Skeleton3D 与 pose 数据一致
- *   - 肩→肘：上臂长 0.28（Skeleton3D.y=-0.28），无水平偏移
- *   - 肘→腕：前臂长 0（wrist local position = 0，由 applyWristPosition 动态计算）
+ * 虚拟人直立站姿，双臂自然下垂。坐标与 Skeleton3D 层级 FK 计算严格一致：
+ *   hips(root) y=1.0（脚底在 y=0，身高到头顶约 1.71）
+ *   spine y=1.20, chest y=1.42, neck y=1.50, head y=1.60
+ *   shoulder y=1.40（x=±0.18）, elbow y=1.10, wrist y=0.82
+ *   hip x=±0.10, knee y=0.54, ankle y=0.06（脚底接触 y=0）
  */
 export const NEUTRAL_POSE: BonePose = {
-  root: jointAt(0, 0, 0),
-  spine: jointAt(0, 1.0, 0),
-  chest: jointAt(0, 1.3, 0),
-  neck: jointAt(0, 1.55, 0),
-  head: jointAt(0, 1.65, 0),
-  // 左臂：肘部在肩正下方（x=0），腕部跟随肘部
-  left_shoulder: jointAt(-0.2, 1.45, 0),
-  left_elbow: jointAt(-0.2, 1.17, 0),    // y = 1.45 - 0.28 = 1.17
-  left_wrist: jointAt(-0.2, 1.17, 0),    // 跟随肘部（applyWristPosition 会修正到正确位置）
-  // 右臂
-  right_shoulder: jointAt(0.2, 1.45, 0),
-  right_elbow: jointAt(0.2, 1.17, 0),
-  right_wrist: jointAt(0.2, 1.17, 0),
+  root: jointAt(0, 1.0, 0),
+  spine: jointAt(0, 1.20, 0),
+  chest: jointAt(0, 1.42, 0),
+  neck: jointAt(0, 1.50, 0),
+  head: jointAt(0, 1.60, 0),
+  left_shoulder: jointAt(-0.18, 1.40, 0),
+  left_elbow: jointAt(-0.18, 1.10, 0),
+  left_wrist: jointAt(-0.18, 0.82, 0),
+  right_shoulder: jointAt(0.18, 1.40, 0),
+  right_elbow: jointAt(0.18, 1.10, 0),
+  right_wrist: jointAt(0.18, 0.82, 0),
+  left_hip: jointAt(-0.10, 1.00, 0),
+  left_knee: jointAt(-0.10, 0.54, 0),
+  left_ankle: jointAt(-0.10, 0.06, 0),
+  right_hip: jointAt(0.10, 1.00, 0),
+  right_knee: jointAt(0.10, 0.54, 0),
+  right_ankle: jointAt(0.10, 0.06, 0),
   left_hand: neutralHand('left'),
   right_hand: neutralHand('right'),
   expression: FacialExpression.NEUTRAL,
