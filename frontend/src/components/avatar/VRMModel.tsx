@@ -144,12 +144,34 @@ function driveHandFingers(
   }
 }
 
+/** AvatarDriver 假设的 hips 世界坐标（HandLocation 坐标体系基准） */
+const ASSUMED_HIPS = new THREE.Vector3(0, 1.0, 0);
+/** 缓存每个 VRM 模型原始 hips 本地位置，避免被 NEUTRAL_POSE 覆盖 */
+const ORIGINAL_HIPS_POS = new WeakMap<VRM, THREE.Vector3>();
+
+/** 读取骨骼世界位置 */
+function getBoneWorldPos(node: THREE.Object3D | null, out: THREE.Vector3): THREE.Vector3 {
+  if (node) node.getWorldPosition(out);
+  return out;
+}
+
+/** 计算骨骼长度：子骨骼相对父骨骼的平移距离（rest pose 下即骨骼长度） */
+function getBoneLength(childNode: THREE.Object3D | null, fallback: number): number {
+  if (!childNode) return fallback;
+  const len = childNode.position.length();
+  // 过滤异常值（0 或过大），用 fallback
+  return len > 0.001 && len < 2.0 ? len : fallback;
+}
+
 /**
  * 应用 VRMPose 到 VRM 模型（新骨骼驱动路径）
  *
  * 三部分：
  *   1. 显式骨骼 rotation：遍历 pose.bones，retarget + smooth 后写入 node.rotation
- *   2. IK 目标反算：pose.ikTargets 指定时，用 solveArm/solveLeg 反算上下肢关节旋转
+ *      hips.position 用"原始 + 偏移"避免覆盖模型 rest pose
+ *   2. IK 目标反算：运行时读取真实肩部/髋部世界位置与骨骼长度，
+ *      将 AvatarDriver 假设坐标（hips 在 y=1.0）转换到模型场景本地坐标，
+ *      保证 IK 几何与模型实际骨骼一致
  *   3. 手形驱动：pose.handShapes 指定时，用 handShapeToBoneRotations 写入手指骨骼
  *
  * @param vrm VRM 模型实例
@@ -164,8 +186,16 @@ function applyVRMPose(
   timestamp: number,
 ): void {
   const humanoid = vrm.humanoid;
+  const scene = vrm.scene;
+  const hipsNode = humanoid.getRawBoneNode('hips' as never);
 
-  // ===== 1. 显式骨骼 rotation（含 retarget + smooth，与旧路径调用方式一致）=====
+  // 首次调用时记录模型原始 hips 本地位置（rest pose）
+  if (hipsNode && !ORIGINAL_HIPS_POS.has(vrm)) {
+    ORIGINAL_HIPS_POS.set(vrm, hipsNode.position.clone());
+  }
+  const originalHips = ORIGINAL_HIPS_POS.get(vrm) ?? new THREE.Vector3(0, 0.9, 0);
+
+  // ===== 1. 显式骨骼 rotation（含 retarget + smooth）=====
   for (const [boneName, transform] of Object.entries(pose.bones)) {
     const vrmBoneName = boneName as VRMBoneName;
     const node = humanoid.getRawBoneNode(vrmBoneName as never);
@@ -173,97 +203,151 @@ function applyVRMPose(
     const retargeted = retargetRotation(vrmBoneName, transform.rotation);
     const smoothed = smoother.smooth(vrmBoneName, retargeted, timestamp);
     node.rotation.set(smoothed.x, smoothed.y, smoothed.z);
-    // hips 额外写入根位移
+    // hips 位移：用"原始 + 偏移"避免覆盖模型 rest pose
+    // AvatarDriver 的 hips.position 是假设坐标系（hips 在 y=1.0），
+    // 转换为相对原始位置的偏移后应用
     if (transform.position && vrmBoneName === 'hips') {
-      node.position.set(transform.position.x, transform.position.y, transform.position.z);
+      const offset = new THREE.Vector3(
+        transform.position.x - ASSUMED_HIPS.x,
+        transform.position.y - ASSUMED_HIPS.y,
+        transform.position.z - ASSUMED_HIPS.z,
+      );
+      node.position.set(
+        originalHips.x + offset.x,
+        originalHips.y + offset.y,
+        originalHips.z + offset.z,
+      );
     }
   }
 
-  // ===== 2. IK 目标反算（覆盖 FK 结果）=====
+  // ===== 2. IK 目标反算（基于模型真实几何）=====
   if (pose.ikTargets) {
-    // 右手 IK：右肩世界坐标 + 腕目标 → rightUpperArm/rightLowerArm 旋转
-    if (pose.ikTargets.rightHand) {
-      const ik = solveArm(
-        { x: 0.18, y: 1.40, z: 0 },
-        pose.ikTargets.rightHand,
-        0.30, 0.30, 'right',
+    // 读取真实 hips 世界位置，作为 AvatarDriver 坐标系到模型世界坐标的基准
+    const hipsWorld = getBoneWorldPos(hipsNode, new THREE.Vector3());
+
+    // 将 AvatarDriver 假设的世界坐标目标转换到模型场景本地坐标
+    // 步骤：realWorld = hipsWorld + (target - ASSUMED_HIPS)
+    //       targetLocal = scene.worldToLocal(realWorld)
+    // 这样消除场景 rotation.y=PI 和 position.y=-0.9 的影响，IK 在本地坐标工作
+    const toSceneLocal = (target: { x: number; y: number; z: number }): THREE.Vector3 => {
+      const offset = new THREE.Vector3(
+        target.x - ASSUMED_HIPS.x,
+        target.y - ASSUMED_HIPS.y,
+        target.z - ASSUMED_HIPS.z,
       );
-      const upperArm = humanoid.getRawBoneNode('rightUpperArm' as never);
-      const lowerArm = humanoid.getRawBoneNode('rightLowerArm' as never);
-      if (upperArm) {
+      const realWorld = hipsWorld.clone().add(offset);
+      return scene.worldToLocal(realWorld);
+    };
+
+    // 右手 IK
+    if (pose.ikTargets.rightHand) {
+      const upperArmNode = humanoid.getRawBoneNode('rightUpperArm' as never);
+      const lowerArmNode = humanoid.getRawBoneNode('rightLowerArm' as never);
+      const handNode = humanoid.getRawBoneNode('rightHand' as never);
+      // 上臂根部世界位置 → 场景本地
+      const shoulderWorld = getBoneWorldPos(upperArmNode, new THREE.Vector3());
+      const shoulderLocal = scene.worldToLocal(shoulderWorld.clone());
+      const targetLocal = toSceneLocal(pose.ikTargets.rightHand);
+      // 骨骼长度：子骨骼相对父骨骼的平移距离
+      const upperArmLen = getBoneLength(lowerArmNode, 0.28);
+      const forearmLen = getBoneLength(handNode, 0.26);
+      const ik = solveArm(
+        { x: shoulderLocal.x, y: shoulderLocal.y, z: shoulderLocal.z },
+        { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
+        upperArmLen, forearmLen, 'right',
+      );
+      if (upperArmNode) {
         const r = retargetRotation('rightUpperArm', ik.shoulderRotation);
         const s = smoother.smooth('rightUpperArm', r, timestamp);
-        upperArm.rotation.set(s.x, s.y, s.z);
+        upperArmNode.rotation.set(s.x, s.y, s.z);
       }
-      if (lowerArm) {
+      if (lowerArmNode) {
         const r = retargetRotation('rightLowerArm', ik.elbowRotation);
         const s = smoother.smooth('rightLowerArm', r, timestamp);
-        lowerArm.rotation.set(s.x, s.y, s.z);
+        lowerArmNode.rotation.set(s.x, s.y, s.z);
       }
     }
-    // 左手 IK：左肩世界坐标 + 腕目标 → leftUpperArm/leftLowerArm 旋转
+    // 左手 IK
     if (pose.ikTargets.leftHand) {
+      const upperArmNode = humanoid.getRawBoneNode('leftUpperArm' as never);
+      const lowerArmNode = humanoid.getRawBoneNode('leftLowerArm' as never);
+      const handNode = humanoid.getRawBoneNode('leftHand' as never);
+      const shoulderWorld = getBoneWorldPos(upperArmNode, new THREE.Vector3());
+      const shoulderLocal = scene.worldToLocal(shoulderWorld.clone());
+      const targetLocal = toSceneLocal(pose.ikTargets.leftHand);
+      const upperArmLen = getBoneLength(lowerArmNode, 0.28);
+      const forearmLen = getBoneLength(handNode, 0.26);
       const ik = solveArm(
-        { x: -0.18, y: 1.40, z: 0 },
-        pose.ikTargets.leftHand,
-        0.30, 0.30, 'left',
+        { x: shoulderLocal.x, y: shoulderLocal.y, z: shoulderLocal.z },
+        { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
+        upperArmLen, forearmLen, 'left',
       );
-      const upperArm = humanoid.getRawBoneNode('leftUpperArm' as never);
-      const lowerArm = humanoid.getRawBoneNode('leftLowerArm' as never);
-      if (upperArm) {
+      if (upperArmNode) {
         const r = retargetRotation('leftUpperArm', ik.shoulderRotation);
         const s = smoother.smooth('leftUpperArm', r, timestamp);
-        upperArm.rotation.set(s.x, s.y, s.z);
+        upperArmNode.rotation.set(s.x, s.y, s.z);
       }
-      if (lowerArm) {
+      if (lowerArmNode) {
         const r = retargetRotation('leftLowerArm', ik.elbowRotation);
         const s = smoother.smooth('leftLowerArm', r, timestamp);
-        lowerArm.rotation.set(s.x, s.y, s.z);
+        lowerArmNode.rotation.set(s.x, s.y, s.z);
       }
     }
-    // 右脚 IK：右髋世界坐标 + 踝目标 → rightUpperLeg/rightLowerLeg 旋转
+    // 右脚 IK
     if (pose.ikTargets.rightFoot) {
+      const upperLegNode = humanoid.getRawBoneNode('rightUpperLeg' as never);
+      const lowerLegNode = humanoid.getRawBoneNode('rightLowerLeg' as never);
+      const footNode = humanoid.getRawBoneNode('rightFoot' as never);
+      const hipWorld = getBoneWorldPos(upperLegNode, new THREE.Vector3());
+      const hipLocal = scene.worldToLocal(hipWorld.clone());
+      const targetLocal = toSceneLocal(pose.ikTargets.rightFoot);
+      const thighLen = getBoneLength(lowerLegNode, 0.42);
+      const shinLen = getBoneLength(footNode, 0.42);
       const ik = solveLeg(
-        { x: 0.10, y: 1.0, z: 0 },
-        pose.ikTargets.rightFoot,
-        0.46, 0.48,
+        { x: hipLocal.x, y: hipLocal.y, z: hipLocal.z },
+        { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
+        thighLen, shinLen,
       );
-      const upperLeg = humanoid.getRawBoneNode('rightUpperLeg' as never);
-      const lowerLeg = humanoid.getRawBoneNode('rightLowerLeg' as never);
-      if (upperLeg) {
+      if (upperLegNode) {
         const r = retargetRotation('rightUpperLeg', ik.hipRotation);
         const s = smoother.smooth('rightUpperLeg', r, timestamp);
-        upperLeg.rotation.set(s.x, s.y, s.z);
+        upperLegNode.rotation.set(s.x, s.y, s.z);
       }
-      if (lowerLeg) {
+      if (lowerLegNode) {
         const r = retargetRotation('rightLowerLeg', ik.kneeRotation);
         const s = smoother.smooth('rightLowerLeg', r, timestamp);
-        lowerLeg.rotation.set(s.x, s.y, s.z);
+        lowerLegNode.rotation.set(s.x, s.y, s.z);
       }
     }
-    // 左脚 IK：左髋世界坐标 + 踝目标 → leftUpperLeg/leftLowerLeg 旋转
+    // 左脚 IK
     if (pose.ikTargets.leftFoot) {
+      const upperLegNode = humanoid.getRawBoneNode('leftUpperLeg' as never);
+      const lowerLegNode = humanoid.getRawBoneNode('leftLowerLeg' as never);
+      const footNode = humanoid.getRawBoneNode('leftFoot' as never);
+      const hipWorld = getBoneWorldPos(upperLegNode, new THREE.Vector3());
+      const hipLocal = scene.worldToLocal(hipWorld.clone());
+      const targetLocal = toSceneLocal(pose.ikTargets.leftFoot);
+      const thighLen = getBoneLength(lowerLegNode, 0.42);
+      const shinLen = getBoneLength(footNode, 0.42);
       const ik = solveLeg(
-        { x: -0.10, y: 1.0, z: 0 },
-        pose.ikTargets.leftFoot,
-        0.46, 0.48,
+        { x: hipLocal.x, y: hipLocal.y, z: hipLocal.z },
+        { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
+        thighLen, shinLen,
       );
-      const upperLeg = humanoid.getRawBoneNode('leftUpperLeg' as never);
-      const lowerLeg = humanoid.getRawBoneNode('leftLowerLeg' as never);
-      if (upperLeg) {
+      if (upperLegNode) {
         const r = retargetRotation('leftUpperLeg', ik.hipRotation);
         const s = smoother.smooth('leftUpperLeg', r, timestamp);
-        upperLeg.rotation.set(s.x, s.y, s.z);
+        upperLegNode.rotation.set(s.x, s.y, s.z);
       }
-      if (lowerLeg) {
+      if (lowerLegNode) {
         const r = retargetRotation('leftLowerLeg', ik.kneeRotation);
         const s = smoother.smooth('leftLowerLeg', r, timestamp);
-        lowerLeg.rotation.set(s.x, s.y, s.z);
+        lowerLegNode.rotation.set(s.x, s.y, s.z);
       }
     }
   }
 
-  // ===== 3. 手形驱动（直接写手指骨骼，与旧 driveHandFingers 一致不走 retarget/smooth）=====
+  // ===== 3. 手形驱动（直接写手指骨骼，不走 retarget/smooth）=====
   if (pose.handShapes) {
     if (pose.handShapes.right) {
       const rotations = handShapeToBoneRotations(pose.handShapes.right, 'right');
