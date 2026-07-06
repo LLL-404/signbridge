@@ -487,6 +487,49 @@ export function generateMotion(gloss: SignGloss): SignMotion {
     // 静态：2 帧（起手形 @ location）
     keyframes.push({ time: 0, pose: buildKeyframePose(startTarget, dominant, shapeStart, expr, head) });
     keyframes.push({ time: 1, pose: buildKeyframePose(startTarget, dominant, shapeEnd, expr, head) });
+  } else if (movement === Movement.UPWARD_ARC || movement === Movement.DOWNWARD_ARC) {
+    // 弧线运动：5 帧，按正弦弧线采样
+    const arcSign = movement === Movement.UPWARD_ARC ? 1 : -1;
+    const arcHeight = 0.15;
+    for (let i = 0; i <= 4; i++) {
+      const t = i / 4;
+      const lerpTarget: Vec3 = {
+        x: startTarget.x + (endTarget.x - startTarget.x) * t,
+        y: startTarget.y + (endTarget.y - startTarget.y) * t,
+        z: startTarget.z + (endTarget.z - startTarget.z) * t,
+      };
+      // 叠加正弦拱形
+      lerpTarget.y += arcSign * Math.sin(t * Math.PI) * arcHeight;
+      const shape = t < 0.5 ? shapeStart : shapeEnd;
+      keyframes.push({ time: t, pose: buildKeyframePose(lerpTarget, dominant, shape, expr, head) });
+    }
+  } else if (movement === Movement.CIRCULAR) {
+    // 圆周运动：5 帧，绕起点画圆
+    const radius = 0.15;
+    for (let i = 0; i <= 4; i++) {
+      const t = i / 4;
+      const angle = t * Math.PI * 2;
+      const target: Vec3 = {
+        x: startTarget.x + Math.cos(angle) * radius,
+        y: startTarget.y + Math.sin(angle) * radius,
+        z: startTarget.z,
+      };
+      const shape = t < 0.5 ? shapeStart : shapeEnd;
+      keyframes.push({ time: t, pose: buildKeyframePose(target, dominant, shape, expr, head) });
+    }
+  } else if (movement === Movement.ZIGZAG) {
+    // 折线抖动：5 帧，正弦抖动
+    const wobble = 0.08;
+    for (let i = 0; i <= 4; i++) {
+      const t = i / 4;
+      const lerpTarget: Vec3 = {
+        x: startTarget.x + (endTarget.x - startTarget.x) * t,
+        y: startTarget.y + (endTarget.y - startTarget.y) * t + Math.sin(t * Math.PI * 4) * wobble,
+        z: startTarget.z + (endTarget.z - startTarget.z) * t,
+      };
+      const shape = t < 0.5 ? shapeStart : shapeEnd;
+      keyframes.push({ time: t, pose: buildKeyframePose(lerpTarget, dominant, shape, expr, head) });
+    }
   } else {
     // 直线运动：3 帧（起/中/终）
     const midTarget: Vec3 = {
@@ -497,6 +540,29 @@ export function generateMotion(gloss: SignGloss): SignMotion {
     keyframes.push({ time: 0, pose: buildKeyframePose(startTarget, dominant, shapeStart, expr, head) });
     keyframes.push({ time: 0.5, pose: buildKeyframePose(midTarget, dominant, shapeStart, expr, head) });
     keyframes.push({ time: 1, pose: buildKeyframePose(endTarget, dominant, shapeEnd, expr, head) });
+  }
+
+  // === 双手动作：副手镜像 IK 目标 ===
+  if (m.is_two_handed) {
+    const nonDominant = dominant === 'left' ? 'right' : 'left';
+    const nonDomKey = nonDominant === 'left' ? 'leftHand' : 'rightHand';
+    keyframes.forEach((kf) => {
+      const domKey = dominant === 'left' ? 'leftHand' : 'rightHand';
+      const domTarget = kf.pose.ikTargets?.[domKey];
+      if (domTarget) {
+        kf.pose.ikTargets = {
+          ...kf.pose.ikTargets,
+          [nonDomKey]: { x: -domTarget.x, y: domTarget.y, z: domTarget.z },
+        };
+      }
+      // 副手手形
+      if (kf.pose.handShapes) {
+        kf.pose.handShapes = {
+          ...kf.pose.handShapes,
+          [nonDominant]: kf.pose.handShapes[dominant],
+        };
+      }
+    });
   }
 
   return {

@@ -52,3 +52,41 @@ describe('generateMotion', () => {
     expect(motion.duration_ms).toBe(1000);
   });
 });
+
+describe('generateMotion 曲线/折线', () => {
+  it('upward_arc 应生成 5 个关键帧', () => {
+    const motion = generateMotion(makeGloss({
+      movement: Movement.UPWARD_ARC,
+      location_start: HandLocation.WAIST_LEVEL,
+      location_end: HandLocation.FOREHEAD_LEVEL,
+    }));
+    expect(motion.keyframes).toHaveLength(5);
+  });
+
+  it('circular 应生成 5 个关键帧', () => {
+    const motion = generateMotion(makeGloss({
+      movement: Movement.CIRCULAR,
+      location_start: HandLocation.CHEST_CENTER,
+      location_end: HandLocation.CHEST_CENTER,
+    }));
+    expect(motion.keyframes).toHaveLength(5);
+  });
+
+  it('zigzag 应生成 5 个关键帧', () => {
+    const motion = generateMotion(makeGloss({
+      movement: Movement.ZIGZAG,
+      location_start: HandLocation.CHEST_CENTER,
+      location_end: HandLocation.CHEST_CENTER,
+    }));
+    expect(motion.keyframes).toHaveLength(5);
+  });
+
+  it('双手动作应含左右两个 IK 目标', () => {
+    const motion = generateMotion(makeGloss({
+      is_two_handed: true,
+      movement: Movement.STATIC,
+    }));
+    expect(motion.keyframes[0].pose.ikTargets?.leftHand).toBeDefined();
+    expect(motion.keyframes[0].pose.ikTargets?.rightHand).toBeDefined();
+  });
+});
