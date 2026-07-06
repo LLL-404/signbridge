@@ -1,5 +1,4 @@
 import type { BonePose, VRMPose, VRMBoneName, BoneTransform } from '@/types/avatar';
-import { NEUTRAL_VRM_POSE } from '@/types/avatar';
 import { FacialExpression, HeadMovement } from '@/types/sign';
 
 /** 旧内部名 → VRM 标准骨骼名映射表 */

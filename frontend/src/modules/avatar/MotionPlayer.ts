@@ -129,8 +129,6 @@ export class MotionPlayer {
   private currentPose: BonePose = NEUTRAL_POSE;
   /** 当前播放的 SignMotion 关键帧序列（新轨道） */
   private currentMotion: SignMotion | null = null;
-  /** SignMotion 起播时间戳（performance.now()） */
-  private motionStartTime: number = 0;
 
   /** 播放一个动作 */
   play(motion: MotionData, onComplete?: () => void): void {
@@ -243,7 +241,6 @@ export class MotionPlayer {
    */
   playMotion(motion: SignMotion): void {
     this.currentMotion = motion;
-    this.motionStartTime = performance.now();
   }
 
   /**

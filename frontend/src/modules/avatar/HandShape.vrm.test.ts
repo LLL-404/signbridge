@@ -14,8 +14,8 @@ describe('handShapeToBoneRotations', () => {
 
   it('FIST_A 应返回食指 proximal 非零屈曲', () => {
     const result = handShapeToBoneRotations(HandShape.FIST_A, 'right');
-    expect(result.rightIndexProximal.x).toBeGreaterThan(0.5);
-    expect(result.rightIndexIntermediate.x).toBeGreaterThan(0.5);
+    expect(result.rightIndexProximal!.x).toBeGreaterThan(0.5);
+    expect(result.rightIndexIntermediate!.x).toBeGreaterThan(0.5);
   });
 
   it('左手应返回 left 前缀的骨骼名', () => {
