@@ -229,3 +229,44 @@ export function interpolateHandshape(
   ) as HandShapeDefinition['fingers'];
   return { shape: to, fingers };
 }
+
+// ===== VRM 手指骨骼映射 =====
+import type { Vec3 } from '@/types/avatar';
+
+/** VRM 手指骨骼名（单手 15 个） */
+const FINGER_BONE_NAMES = [
+  'ThumbMetacarpal', 'ThumbProximal', 'ThumbDistal',
+  'IndexProximal', 'IndexIntermediate', 'IndexDistal',
+  'MiddleProximal', 'MiddleIntermediate', 'MiddleDistal',
+  'RingProximal', 'RingIntermediate', 'RingDistal',
+  'LittleProximal', 'LittleIntermediate', 'LittleDistal',
+] as const;
+
+/**
+ * 将 HandShape 转为 VRM 手指骨骼旋转
+ * @param shape 手形枚举
+ * @param side 'left' | 'right'
+ * @returns VRM 骨骼名 → 旋转（仅 X 轴屈曲，Y/Z 为 0）
+ */
+export function handShapeToBoneRotations(
+  shape: HandShape,
+  side: 'left' | 'right',
+): Partial<Record<string, Vec3>> {
+  const def = getHandShapeDefinition(shape);
+  const prefix = side === 'left' ? 'left' : 'right';
+  const result: Partial<Record<string, Vec3>> = {};
+
+  def.fingers.forEach((finger, i) => {
+    const baseName = FINGER_BONE_NAMES[i * 3];     // proximal/metacarpal
+    const midName = FINGER_BONE_NAMES[i * 3 + 1];  // intermediate/proximal
+    const tipName = FINGER_BONE_NAMES[i * 3 + 2];  // distal
+
+    // 拇指：mcp→Metacarpal, pip→Proximal, dip→Distal
+    // 其他指：mcp→Proximal, pip→Intermediate, dip→Distal
+    result[`${prefix}${baseName}`] = { x: finger.mcp, y: 0, z: 0 };
+    result[`${prefix}${midName}`] = { x: finger.pip, y: 0, z: 0 };
+    result[`${prefix}${tipName}`] = { x: finger.dip, y: 0, z: 0 };
+  });
+
+  return result;
+}
