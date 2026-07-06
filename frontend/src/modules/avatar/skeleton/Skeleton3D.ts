@@ -7,7 +7,7 @@
 //   沿局部 -Y 方向偏移半个长度，使圆柱一端对齐关节、另一端对齐下一关节
 //   旋转 bone 时就是绕关节旋转，圆柱跟随旋转，天然保证连接不断开
 import * as THREE from 'three';
-import type { Vec3, BonePose, HandPose } from '@/types/avatar';
+import type { Vec3, BonePose, HandPose, VRMPose, VRMBoneName } from '@/types/avatar';
 import { HandShape } from '@/types/sign';
 import { FINGER_NAMES, FINGER_JOINTS } from './joints';
 
@@ -91,6 +91,37 @@ const COLOR = {
   clothDark: 0x3a78c0,
   joint: 0x2563eb,
   palm: 0xe0c8a8,
+};
+
+/**
+ * VRM 标准骨骼名 → Skeleton3D 内部骨骼名映射
+ * 用于 applyVRMPose 消费新骨骼结构。
+ * leftHand/rightHand 在 VRMPose.bones 里不会出现（手指由 handShapes 驱动），
+ * 此处映射到 left_wrist/right_wrist 作 fallback。
+ */
+const VRM_BONE_MAP: Record<VRMBoneName, string> = {
+  hips: 'root',
+  spine: 'spine',
+  chest: 'chest',
+  upperChest: 'chest',
+  neck: 'neck',
+  head: 'head',
+  leftShoulder: 'left_shoulder',
+  leftUpperArm: 'left_elbow',
+  leftLowerArm: 'left_wrist',
+  leftHand: 'left_wrist',
+  rightShoulder: 'right_shoulder',
+  rightUpperArm: 'right_elbow',
+  rightLowerArm: 'right_wrist',
+  rightHand: 'right_wrist',
+  leftUpperLeg: 'left_hip',
+  leftLowerLeg: 'left_knee',
+  leftFoot: 'left_ankle',
+  leftToes: 'left_ankle',
+  rightUpperLeg: 'right_hip',
+  rightLowerLeg: 'right_knee',
+  rightFoot: 'right_ankle',
+  rightToes: 'right_ankle',
 };
 
 /** 3D 骨骼系统类 */
@@ -439,6 +470,14 @@ export class Skeleton3D {
     }
   }
 
+  /** 设置骨骼本地位置 */
+  setBonePosition(name: string, position: Vec3): void {
+    const bone = this.bones.get(name);
+    if (bone) {
+      bone.position.set(position.x, position.y, position.z);
+    }
+  }
+
   /** 应用完整姿态
    *  采用纯 FK（前向运动学）：只设骨骼本地旋转，不覆写位置，
    *  这样骨骼层级自动保证关节永远连接
@@ -477,6 +516,24 @@ export class Skeleton3D {
 
     // 触发世界矩阵更新
     this.skeletonRoot.updateMatrixWorld(true);
+  }
+
+  /**
+   * 应用 VRMPose（新骨骼结构）到 FK 链
+   * 与旧 applyPose 并存：消费 VRM humanoid 标准骨骼名，
+   * 通过 VRM_BONE_MAP 翻译为内部骨骼名后写入 rotation/position。
+   */
+  applyVRMPose(pose: VRMPose): void {
+    // hips 根位置
+    const hips = pose.bones.hips;
+    if (hips?.position) {
+      this.setBonePosition('root', hips.position);
+    }
+    // 遍历骨骼写 rotation
+    for (const [vrmName, internalName] of Object.entries(VRM_BONE_MAP)) {
+      const t = pose.bones[vrmName as VRMBoneName];
+      if (t) this.setBoneRotation(internalName, t.rotation);
+    }
   }
 
   /** 应用手部姿态 */
