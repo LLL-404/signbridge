@@ -17,11 +17,12 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, type VRM } from '@pixiv/three-vrm';
-import type { BonePose } from '@/types/avatar';
+import type { BonePose, VRMPose, VRMBoneName } from '@/types/avatar';
 import { FacialExpression, HeadMovement, HandShape } from '@/types/sign';
-import { getHandShapeDefinition } from '@/modules/avatar/HandShape';
+import { getHandShapeDefinition, handShapeToBoneRotations } from '@/modules/avatar/HandShape';
 import { retargetRotation } from '@/modules/avatar/Retargeter';
 import { BoneSmoother } from '@/modules/avatar/Smoother';
+import { solve as solveArm, solveLeg } from '@/modules/avatar/IKSolver';
 
 // 身体骨骼映射：AvatarDriver 内部名称 → VRM humanoid 标准骨骼名称
 // 含躯干、上肢、下肢，覆盖完整人形骨架
@@ -143,10 +144,152 @@ function driveHandFingers(
   }
 }
 
+/**
+ * 应用 VRMPose 到 VRM 模型（新骨骼驱动路径）
+ *
+ * 三部分：
+ *   1. 显式骨骼 rotation：遍历 pose.bones，retarget + smooth 后写入 node.rotation
+ *   2. IK 目标反算：pose.ikTargets 指定时，用 solveArm/solveLeg 反算上下肢关节旋转
+ *   3. 手形驱动：pose.handShapes 指定时，用 handShapeToBoneRotations 写入手指骨骼
+ *
+ * @param vrm VRM 模型实例
+ * @param pose VRM 标准姿态
+ * @param smoother BoneSmoother 实例（与旧路径共享）
+ * @param timestamp 当前时间戳（毫秒，与旧路径一致用 state.clock.elapsedTime * 1000）
+ */
+function applyVRMPose(
+  vrm: VRM,
+  pose: VRMPose,
+  smoother: BoneSmoother,
+  timestamp: number,
+): void {
+  const humanoid = vrm.humanoid;
+
+  // ===== 1. 显式骨骼 rotation（含 retarget + smooth，与旧路径调用方式一致）=====
+  for (const [boneName, transform] of Object.entries(pose.bones)) {
+    const vrmBoneName = boneName as VRMBoneName;
+    const node = humanoid.getRawBoneNode(vrmBoneName as never);
+    if (!node) continue;
+    const retargeted = retargetRotation(vrmBoneName, transform.rotation);
+    const smoothed = smoother.smooth(vrmBoneName, retargeted, timestamp);
+    node.rotation.set(smoothed.x, smoothed.y, smoothed.z);
+    // hips 额外写入根位移
+    if (transform.position && vrmBoneName === 'hips') {
+      node.position.set(transform.position.x, transform.position.y, transform.position.z);
+    }
+  }
+
+  // ===== 2. IK 目标反算（覆盖 FK 结果）=====
+  if (pose.ikTargets) {
+    // 右手 IK：右肩世界坐标 + 腕目标 → rightUpperArm/rightLowerArm 旋转
+    if (pose.ikTargets.rightHand) {
+      const ik = solveArm(
+        { x: 0.18, y: 1.40, z: 0 },
+        pose.ikTargets.rightHand,
+        0.30, 0.30, 'right',
+      );
+      const upperArm = humanoid.getRawBoneNode('rightUpperArm' as never);
+      const lowerArm = humanoid.getRawBoneNode('rightLowerArm' as never);
+      if (upperArm) {
+        const r = retargetRotation('rightUpperArm', ik.shoulderRotation);
+        const s = smoother.smooth('rightUpperArm', r, timestamp);
+        upperArm.rotation.set(s.x, s.y, s.z);
+      }
+      if (lowerArm) {
+        const r = retargetRotation('rightLowerArm', ik.elbowRotation);
+        const s = smoother.smooth('rightLowerArm', r, timestamp);
+        lowerArm.rotation.set(s.x, s.y, s.z);
+      }
+    }
+    // 左手 IK：左肩世界坐标 + 腕目标 → leftUpperArm/leftLowerArm 旋转
+    if (pose.ikTargets.leftHand) {
+      const ik = solveArm(
+        { x: -0.18, y: 1.40, z: 0 },
+        pose.ikTargets.leftHand,
+        0.30, 0.30, 'left',
+      );
+      const upperArm = humanoid.getRawBoneNode('leftUpperArm' as never);
+      const lowerArm = humanoid.getRawBoneNode('leftLowerArm' as never);
+      if (upperArm) {
+        const r = retargetRotation('leftUpperArm', ik.shoulderRotation);
+        const s = smoother.smooth('leftUpperArm', r, timestamp);
+        upperArm.rotation.set(s.x, s.y, s.z);
+      }
+      if (lowerArm) {
+        const r = retargetRotation('leftLowerArm', ik.elbowRotation);
+        const s = smoother.smooth('leftLowerArm', r, timestamp);
+        lowerArm.rotation.set(s.x, s.y, s.z);
+      }
+    }
+    // 右脚 IK：右髋世界坐标 + 踝目标 → rightUpperLeg/rightLowerLeg 旋转
+    if (pose.ikTargets.rightFoot) {
+      const ik = solveLeg(
+        { x: 0.10, y: 1.0, z: 0 },
+        pose.ikTargets.rightFoot,
+        0.46, 0.48,
+      );
+      const upperLeg = humanoid.getRawBoneNode('rightUpperLeg' as never);
+      const lowerLeg = humanoid.getRawBoneNode('rightLowerLeg' as never);
+      if (upperLeg) {
+        const r = retargetRotation('rightUpperLeg', ik.hipRotation);
+        const s = smoother.smooth('rightUpperLeg', r, timestamp);
+        upperLeg.rotation.set(s.x, s.y, s.z);
+      }
+      if (lowerLeg) {
+        const r = retargetRotation('rightLowerLeg', ik.kneeRotation);
+        const s = smoother.smooth('rightLowerLeg', r, timestamp);
+        lowerLeg.rotation.set(s.x, s.y, s.z);
+      }
+    }
+    // 左脚 IK：左髋世界坐标 + 踝目标 → leftUpperLeg/leftLowerLeg 旋转
+    if (pose.ikTargets.leftFoot) {
+      const ik = solveLeg(
+        { x: -0.10, y: 1.0, z: 0 },
+        pose.ikTargets.leftFoot,
+        0.46, 0.48,
+      );
+      const upperLeg = humanoid.getRawBoneNode('leftUpperLeg' as never);
+      const lowerLeg = humanoid.getRawBoneNode('leftLowerLeg' as never);
+      if (upperLeg) {
+        const r = retargetRotation('leftUpperLeg', ik.hipRotation);
+        const s = smoother.smooth('leftUpperLeg', r, timestamp);
+        upperLeg.rotation.set(s.x, s.y, s.z);
+      }
+      if (lowerLeg) {
+        const r = retargetRotation('leftLowerLeg', ik.kneeRotation);
+        const s = smoother.smooth('leftLowerLeg', r, timestamp);
+        lowerLeg.rotation.set(s.x, s.y, s.z);
+      }
+    }
+  }
+
+  // ===== 3. 手形驱动（直接写手指骨骼，与旧 driveHandFingers 一致不走 retarget/smooth）=====
+  if (pose.handShapes) {
+    if (pose.handShapes.right) {
+      const rotations = handShapeToBoneRotations(pose.handShapes.right, 'right');
+      for (const [boneName, rot] of Object.entries(rotations)) {
+        if (!rot) continue;
+        const node = humanoid.getRawBoneNode(boneName as never);
+        if (node) node.rotation.set(rot.x, rot.y, rot.z);
+      }
+    }
+    if (pose.handShapes.left) {
+      const rotations = handShapeToBoneRotations(pose.handShapes.left, 'left');
+      for (const [boneName, rot] of Object.entries(rotations)) {
+        if (!rot) continue;
+        const node = humanoid.getRawBoneNode(boneName as never);
+        if (node) node.rotation.set(rot.x, rot.y, rot.z);
+      }
+    }
+  }
+}
+
 /** VRMModel Props */
 export interface VRMModelProps {
-  /** 当前姿态 */
+  /** 当前姿态（旧 BonePose，作 fallback） */
   pose: BonePose;
+  /** VRM 标准姿态（新路径，提供时优先于 pose） */
+  vrmPose?: VRMPose;
   /** VRM 模型路径（public 目录下的相对路径） */
   modelUrl?: string;
   /** 注视目标（世界坐标） */
@@ -158,6 +301,7 @@ export interface VRMModelProps {
 /** VRM 虚拟人模型组件 */
 export function VRMModel({
   pose,
+  vrmPose,
   modelUrl = '/models/avatar.vrm',
   lookAtTarget,
   onLoaded,
@@ -165,6 +309,7 @@ export function VRMModel({
   const groupRef = useRef<THREE.Group>(null);
   const vrmRef = useRef<VRM | null>(null);
   const poseRef = useRef<BonePose>(pose);
+  const vrmPoseRef = useRef<VRMPose | null>(vrmPose ?? null);
   const blinkTimerRef = useRef(0);
   const isBlinkingRef = useRef(false);
   const blinkOpenRef = useRef(1);
@@ -175,8 +320,9 @@ export function VRMModel({
   // 更新 pose 引用
   useEffect(() => {
     poseRef.current = pose;
+    vrmPoseRef.current = vrmPose ?? null;
     smoother.reset();
-  }, [pose, smoother]);
+  }, [pose, vrmPose, smoother]);
 
   // 异步加载 VRM
   useEffect(() => {
@@ -228,37 +374,46 @@ export function VRMModel({
     if (!vrm || !isLoaded) return;
 
     const currentPose = poseRef.current;
+    const currentVRMPose = vrmPoseRef.current;
     const humanoid = vrm.humanoid;
     const timestamp = state.clock.elapsedTime * 1000;
     headAnimTimeRef.current += delta;
 
-    // ===== 身体骨骼驱动（含重定向 + 平滑滤波）=====
-    // 顺序：先下肢→躯干→头→上肢，遵循骨骼层级，避免父级旋转影响子级世界变换计算
-    for (const [internalName, vrmBoneName] of Object.entries(BODY_BONE_MAP)) {
-      const boneNode = humanoid.getRawBoneNode(vrmBoneName as never);
-      if (!boneNode) continue;
-      const poseBone = currentPose[internalName as keyof BonePose] as
-        | { rotation?: { x: number; y: number; z: number } }
-        | undefined;
-      if (!poseBone?.rotation) continue;
+    if (currentVRMPose) {
+      // ===== 新 VRMPose 驱动路径（优先）=====
+      // applyVRMPose 内部完成：显式骨骼 rotation + IK 反算 + 手形驱动
+      applyVRMPose(vrm, currentVRMPose, smoother, timestamp);
+    } else {
+      // ===== 旧 BonePose 驱动路径（保留作 fallback）=====
+      // 身体骨骼驱动（含重定向 + 平滑滤波）
+      // 顺序：先下肢→躯干→头→上肢，遵循骨骼层级，避免父级旋转影响子级世界变换计算
+      for (const [internalName, vrmBoneName] of Object.entries(BODY_BONE_MAP)) {
+        const boneNode = humanoid.getRawBoneNode(vrmBoneName as never);
+        if (!boneNode) continue;
+        const poseBone = currentPose[internalName as keyof BonePose] as
+          | { rotation?: { x: number; y: number; z: number } }
+          | undefined;
+        if (!poseBone?.rotation) continue;
 
-      // 1. 重定向：补偿 T-pose（VRM）与 A-pose（内部 IK）的 rest pose 差异
-      //    主要是肩部，T-pose 双臂水平外展，A-pose 双臂下垂
-      const retargeted = retargetRotation(vrmBoneName, poseBone.rotation);
-      // 2. 平滑：One-Euro Filter 抑制帧间抖动
-      const smoothed = smoother.smooth(vrmBoneName, retargeted, timestamp);
-      boneNode.rotation.set(smoothed.x, smoothed.y, smoothed.z);
+        // 1. 重定向：补偿 T-pose（VRM）与 A-pose（内部 IK）的 rest pose 差异
+        //    主要是肩部，T-pose 双臂水平外展，A-pose 双臂下垂
+        const retargeted = retargetRotation(vrmBoneName, poseBone.rotation);
+        // 2. 平滑：One-Euro Filter 抑制帧间抖动
+        const smoothed = smoother.smooth(vrmBoneName, retargeted, timestamp);
+        boneNode.rotation.set(smoothed.x, smoothed.y, smoothed.z);
+      }
+
+      // 手指骨骼驱动（从 HandShape 查表）
+      // 不再引用 BonePose 中不存在的 left_thumb_mcp 等字段
+      driveHandFingers(humanoid, currentPose.left_hand.shape, 'left');
+      driveHandFingers(humanoid, currentPose.right_hand.shape, 'right');
     }
 
-    // ===== 手指骨骼驱动（从 HandShape 查表）=====
-    // 不再引用 BonePose 中不存在的 left_thumb_mcp 等字段
-    driveHandFingers(humanoid, currentPose.left_hand.shape, 'left');
-    driveHandFingers(humanoid, currentPose.right_hand.shape, 'right');
-
     // ===== 头部运动叠加 =====
+    // vrmPose 模式下用 VRMPose.bones.head + headMovement；否则用旧 BonePose 字段
     const headBone = humanoid.getRawBoneNode('head' as never);
     const neckBone = humanoid.getRawBoneNode('neck' as never);
-    const poseHead = currentPose.head;
+    const poseHead = currentVRMPose?.bones.head ?? currentPose.head;
     const baseRotX = poseHead?.rotation?.x ?? 0;
     const baseRotY = poseHead?.rotation?.y ?? 0;
     const baseRotZ = poseHead?.rotation?.z ?? 0;
@@ -268,7 +423,7 @@ export function VRMModel({
     let headOffsetZ = 0;
     const t = headAnimTimeRef.current;
 
-    switch (currentPose.head_movement) {
+    switch (currentVRMPose?.headMovement ?? currentPose.head_movement) {
       case HeadMovement.NOD:
         headOffsetX = Math.sin(t * Math.PI * 2 * 1.5) * 0.25;
         break;
@@ -300,7 +455,7 @@ export function VRMModel({
     // ===== 表情驱动 =====
     const mgr = vrm.expressionManager;
     if (mgr) {
-      const expr = EXPRESSION_MAP[currentPose.expression] ?? 'neutral';
+      const expr = EXPRESSION_MAP[currentVRMPose?.expression ?? currentPose.expression] ?? 'neutral';
       const presets = ['happy', 'sad', 'angry', 'surprised', 'fun', 'neutral'];
       for (const p of presets) {
         mgr.setValue(p, 0);
