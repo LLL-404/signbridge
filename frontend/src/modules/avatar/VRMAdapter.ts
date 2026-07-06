@@ -96,7 +96,7 @@ const V3_TO_EULER = (
  * 使用方法：
  * ```
  * const adapter = new VRMAdapter();
- * await adapter.load('/models/avatar.vrm', scene);
+ * await adapter.load(`${import.meta.env.BASE_URL}models/avatar.vrm`, scene);
  * adapter.applyPose(pose);           // 每帧调用
  * adapter.setExpression('happy');    // 表情控制
  * adapter.update(deltaTime);          // VRM 内部更新

@@ -152,7 +152,7 @@ export default function Avatar3D({
   containerStyle,
   className,
   mode = 'skeleton',
-  modelUrl = '/models/avatar.vrm',
+  modelUrl = `${import.meta.env.BASE_URL}models/avatar.vrm`,
   onVRMLoaded,
 }: Avatar3DProps) {
   const currentPose = pose ?? NEUTRAL_POSE;

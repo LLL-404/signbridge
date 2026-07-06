@@ -302,7 +302,7 @@ export interface VRMModelProps {
 export function VRMModel({
   pose,
   vrmPose,
-  modelUrl = '/models/avatar.vrm',
+  modelUrl = `${import.meta.env.BASE_URL}models/avatar.vrm`,
   lookAtTarget,
   onLoaded,
 }: VRMModelProps) {
