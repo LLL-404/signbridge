@@ -8,8 +8,8 @@ import { AvatarDriver } from '@/modules/avatar/AvatarDriver';
 import { KeypointExtractor } from '@/modules/recognition/KeypointExtractor';
 import { SequenceClassifier } from '@/modules/recognition/SequenceClassifier';
 import { ConfidenceFilter } from '@/modules/recognition/ConfidenceFilter';
-import { NEUTRAL_POSE } from '@/types/avatar';
-import type { BonePose } from '@/types/avatar';
+import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
+import type { BonePose, VRMPose } from '@/types/avatar';
 import type { FrameKeypoints, KeypointSequence, RecognitionStatus } from '@/types/recognition';
 import { PageHeader } from '@/components/common/PageHeader';
 
@@ -57,6 +57,7 @@ export function DialoguePage() {
 
   // ===== 虚拟人（语音→手语）=====
   const [currentPose, setCurrentPose] = useState<BonePose>(NEUTRAL_POSE);
+  const [currentVRMPose, setCurrentVRMPose] = useState<VRMPose>(NEUTRAL_VRM_POSE);
   const avatarDriverRef = useRef<AvatarDriver | null>(null);
   if (avatarDriverRef.current === null) {
     avatarDriverRef.current = new AvatarDriver();
@@ -119,6 +120,8 @@ export function DialoguePage() {
           lastPoseRef.current = pose;
           setCurrentPose(pose);
         }
+        // VRM 新骨骼轨道：每帧同步
+        setCurrentVRMPose(driver.getCurrentVRMPose());
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -294,7 +297,7 @@ export function DialoguePage() {
           <VoiceInput onText={handleVoiceText} placeholder="点击麦克风说话，将转为手语" />
           <div className="flex items-start justify-center">
             <div className="aspect-[6/7] w-full max-w-[360px]">
-              <AvatarCanvas pose={currentPose} width="100%" height="100%" />
+              <AvatarCanvas pose={currentPose} vrmPose={currentVRMPose} width="100%" height="100%" />
             </div>
           </div>
         </div>

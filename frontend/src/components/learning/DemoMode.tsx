@@ -36,7 +36,7 @@ export function DemoMode() {
   const [displayedText, setDisplayedText] = useState('');
   const [glossItems, setGlossItems] = useState<string[]>([]);
 
-  const { pose, isPlaying: avatarPlaying, playSequence, stop } = useAvatarPlayer();
+  const { pose, vrmPose, isPlaying: avatarPlaying, playSequence, stop } = useAvatarPlayer();
   const autoPlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scenario: DemoScenario | undefined = getScenario(selectedId);
@@ -165,7 +165,7 @@ export function DemoMode() {
             {/* 虚拟人演示区 */}
             <div className="flex-1">
               <div className="bg-dark-900 rounded-xl overflow-hidden aspect-video relative">
-                <AvatarCanvas pose={pose} width="100%" height="100%" className="!rounded-none" />
+                <AvatarCanvas pose={pose} vrmPose={vrmPose} width="100%" height="100%" className="!rounded-none" />
                 <NonManualMarkerOverlay pose={pose} />
                 {!displayedText && (
                   <div className="absolute inset-0 flex items-center justify-center text-content-muted">

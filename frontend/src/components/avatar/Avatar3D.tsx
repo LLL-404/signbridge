@@ -3,7 +3,7 @@ import { useRef, useMemo, useEffect, Suspense, type CSSProperties, lazy } from '
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import type { BonePose } from '@/types/avatar';
+import type { BonePose, VRMPose } from '@/types/avatar';
 import { NEUTRAL_POSE } from '@/types/avatar';
 import { Skeleton3D } from '@/modules/avatar/skeleton/Skeleton3D';
 import { BoneSmoother } from '@/modules/avatar/Smoother';
@@ -13,8 +13,10 @@ export type AvatarMode = 'skeleton' | 'vrm';
 
 /** Avatar3D 组件 Props */
 export interface Avatar3DProps {
-  /** 当前姿态 */
+  /** 当前姿态（旧 BonePose，供 skeleton 模式与 VRM 回退路径） */
   pose?: BonePose;
+  /** VRM 标准姿态（新骨骼轨道，提供时 VRM 模型优先使用） */
+  vrmPose?: VRMPose;
   /** 画布宽度 */
   width?: number | string;
   /** 画布高度 */
@@ -134,24 +136,27 @@ const LazyVRMModel = lazy(() =>
 
 function VRMAvatarModel({
   pose,
+  vrmPose,
   modelUrl,
   onLoaded,
 }: {
   pose: BonePose;
+  vrmPose?: VRMPose;
   modelUrl?: string;
   onLoaded?: (vrm: unknown) => void;
 }) {
-  return <LazyVRMModel pose={pose} modelUrl={modelUrl} onLoaded={onLoaded} />;
+  return <LazyVRMModel pose={pose} vrmPose={vrmPose} modelUrl={modelUrl} onLoaded={onLoaded} />;
 }
 
 /** 3D 虚拟人组件 */
 export default function Avatar3D({
   pose,
+  vrmPose,
   width = 400,
   height = 500,
   containerStyle,
   className,
-  mode = 'skeleton',
+  mode = 'vrm',
   modelUrl = `${import.meta.env.BASE_URL}models/avatar.vrm`,
   onVRMLoaded,
 }: Avatar3DProps) {
@@ -205,6 +210,7 @@ export default function Avatar3D({
           <Suspense fallback={null}>
             <VRMAvatarModel
               pose={currentPose}
+              vrmPose={vrmPose}
               modelUrl={modelUrl}
               onLoaded={onVRMLoaded}
             />

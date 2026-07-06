@@ -3,14 +3,16 @@
 // 供学习模块各子组件复用，避免重复编写驱动逻辑
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AvatarDriver } from '@/modules/avatar/AvatarDriver';
-import type { BonePose } from '@/types/avatar';
-import { NEUTRAL_POSE } from '@/types/avatar';
+import type { BonePose, VRMPose } from '@/types/avatar';
+import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
 import type { GlossSequence } from '@/types/grammar';
 
 /** useAvatarPlayer 返回值 */
 export interface UseAvatarPlayerReturn {
-  /** 当前虚拟人姿态 */
+  /** 当前虚拟人姿态（旧 BonePose，供 2D/skeleton 模式） */
   pose: BonePose;
+  /** 当前 VRM 姿态（新骨骼轨道，供 VRM 模型驱动） */
+  vrmPose: VRMPose;
   /** 是否正在播放 */
   isPlaying: boolean;
   /** 播放单个词汇动作 */
@@ -30,6 +32,7 @@ export interface UseAvatarPlayerReturn {
 export function useAvatarPlayer(): UseAvatarPlayerReturn {
   const driverRef = useRef<AvatarDriver>(new AvatarDriver());
   const [pose, setPose] = useState<BonePose>(NEUTRAL_POSE);
+  const [vrmPose, setVrmPose] = useState<VRMPose>(NEUTRAL_VRM_POSE);
   const [isPlaying, setIsPlaying] = useState(false);
 
   const rafRef = useRef<number>(0);
@@ -50,6 +53,7 @@ export function useAvatarPlayer(): UseAvatarPlayerReturn {
       // 仅在组件存活时更新状态
       if (mountedRef.current) {
         setPose(driver.getCurrentPose());
+        setVrmPose(driver.getCurrentVRMPose());
       }
       rafRef.current = requestAnimationFrame(loop);
     };
@@ -87,5 +91,5 @@ export function useAvatarPlayer(): UseAvatarPlayerReturn {
     if (mountedRef.current) setIsPlaying(false);
   }, []);
 
-  return { pose, isPlaying, playGloss, playSequence, stop };
+  return { pose, vrmPose, isPlaying, playGloss, playSequence, stop };
 }

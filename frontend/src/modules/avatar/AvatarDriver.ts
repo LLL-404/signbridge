@@ -278,6 +278,11 @@ export class AvatarDriver {
   private resolvePromise: (() => void) | null = null;
   /** 用户传入的完成回调 */
   private onCompleteCallback: (() => void) | null = null;
+  /** VRM 关键帧动作队列（新骨骼轨道，与旧 MotionData 双轨并行） */
+  private vrmQueue: SignMotion[] = [];
+  private vrmIndex = 0;
+  private vrmTime = 0;
+  private vrmPlaying = false;
 
   /**
    * 播放词汇序列
@@ -299,6 +304,19 @@ export class AvatarDriver {
     this.playing = true;
     this.onCompleteCallback = onComplete ?? null;
 
+    // 构建 VRM 关键帧队列（新骨骼轨道）
+    this.vrmQueue = [];
+    for (const item of sequence.items) {
+      const vrmMotion = await this.prepareVRMMotion(item.gloss_id, item.non_manual, sequence.sentence_non_manual);
+      if (vrmMotion) this.vrmQueue.push(vrmMotion);
+    }
+    this.vrmIndex = 0;
+    this.vrmTime = 0;
+    this.vrmPlaying = this.vrmQueue.length > 0;
+    if (this.vrmPlaying) {
+      this.motionPlayer.playMotion(this.vrmQueue[0]);
+    }
+
     return new Promise<void>((resolve) => {
       this.resolvePromise = resolve;
       if (this.queue.length > 0) {
@@ -315,15 +333,25 @@ export class AvatarDriver {
     this.queue = [];
     this.queueIndex = 0;
     this.playing = false;
+    this.vrmQueue = [];
+    this.vrmIndex = 0;
+    this.vrmTime = 0;
+    this.vrmPlaying = false;
     this.onCompleteCallback = null;
     const resolve = this.resolvePromise;
     this.resolvePromise = null;
     if (resolve) resolve();
   }
 
-  /** 获取当前姿态 */
+  /** 获取当前姿态（旧 BonePose 轨道，供 2D/skeleton 模式） */
   getCurrentPose(): BonePose {
     return this.motionPlayer.getCurrentPose();
+  }
+
+  /** 获取当前 VRM 姿态（新骨骼轨道，供 VRM 模型驱动） */
+  getCurrentVRMPose(): VRMPose {
+    if (!this.vrmPlaying || this.vrmQueue.length === 0) return NEUTRAL_VRM_POSE;
+    return this.motionPlayer.getPoseAt(this.vrmTime);
   }
 
   /** 设置播放速度 */
@@ -341,6 +369,20 @@ export class AvatarDriver {
   update(deltaTime: number): void {
     if (!this.playing) return;
     this.motionPlayer.update(deltaTime);
+    // VRM 关键帧轨道推进
+    if (this.vrmPlaying) {
+      this.vrmTime += deltaTime * this.speed;
+      const current = this.vrmQueue[this.vrmIndex];
+      if (current && this.vrmTime >= current.duration_ms) {
+        this.vrmTime = 0;
+        this.vrmIndex++;
+        if (this.vrmIndex < this.vrmQueue.length) {
+          this.motionPlayer.playMotion(this.vrmQueue[this.vrmIndex]);
+        } else {
+          this.vrmPlaying = false;
+        }
+      }
+    }
   }
 
   // ===== 内部方法 =====
@@ -364,6 +406,30 @@ export class AvatarDriver {
     // 附加非手动标记：item 级优先，否则用句子级
     const mark = itemNonManual ?? sentenceNonManual;
     return mark ? applyNonManual(motion, mark) : motion;
+  }
+
+  /**
+   * 准备单个词汇的 VRM 关键帧动作（新骨骼轨道）
+   * 始终基于 SignGloss 通过 generateMotion 生成，附加非手动标记到每帧
+   */
+  private async prepareVRMMotion(
+    glossId: string,
+    itemNonManual?: NonManualMark,
+    sentenceNonManual?: NonManualMark,
+  ): Promise<SignMotion | null> {
+    const gloss = await vocabularyStore.getById(glossId);
+    if (!gloss) return null;
+    const motion = generateMotion(gloss);
+    const mark = itemNonManual ?? sentenceNonManual;
+    if (mark) {
+      const expression = parseFacialExpression(mark.expression);
+      const headMovement = parseHeadMovement(mark.head_movement);
+      motion.keyframes = motion.keyframes.map((kf) => ({
+        ...kf,
+        pose: { ...kf.pose, expression, headMovement },
+      }));
+    }
+    return motion;
   }
 
   /**
@@ -408,6 +474,7 @@ export class AvatarDriver {
   /** 整个序列播放完成 */
   private finish(): void {
     this.playing = false;
+    this.vrmPlaying = false;
     const cb = this.onCompleteCallback;
     this.onCompleteCallback = null;
     const resolve = this.resolvePromise;

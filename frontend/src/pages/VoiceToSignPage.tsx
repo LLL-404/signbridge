@@ -23,8 +23,8 @@ import AvatarCanvas from '@/components/avatar/AvatarCanvas';
 import { grammarEngine } from '@/modules/grammar/GrammarEngine';
 import { AvatarDriver } from '@/modules/avatar/AvatarDriver';
 import { useAvatarStore } from '@/stores/avatarStore';
-import { NEUTRAL_POSE } from '@/types/avatar';
-import type { BonePose } from '@/types/avatar';
+import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
+import type { BonePose, VRMPose } from '@/types/avatar';
 import type { GlossSequence, GlossSequenceItem } from '@/types/grammar';
 import { PageHeader } from '@/components/common/PageHeader';
 
@@ -48,8 +48,10 @@ export function VoiceToSignPage() {
   const [glossItems, setGlossItems] = useState<GlossSequenceItem[]>([]);
   /** 转换错误信息 */
   const [convertError, setConvertError] = useState<string | null>(null);
-  /** 当前虚拟人姿态（传给 Avatar3D） */
+  /** 当前虚拟人姿态（传给 Avatar3D，旧 BonePose 轨道） */
   const [currentPose, setCurrentPose] = useState<BonePose>(NEUTRAL_POSE);
+  /** 当前 VRM 姿态（新骨骼轨道，传给 VRM 模型） */
+  const [currentVRMPose, setCurrentVRMPose] = useState<VRMPose>(NEUTRAL_VRM_POSE);
 
   // ===== 全局状态（avatarStore） =====
   const mode = useAvatarStore((s) => s.mode);
@@ -146,6 +148,8 @@ export function VoiceToSignPage() {
           lastPoseRef.current = pose;
           setCurrentPose(pose);
         }
+        // VRM 新骨骼轨道：每帧同步
+        setCurrentVRMPose(driver.getCurrentVRMPose());
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -191,7 +195,7 @@ export function VoiceToSignPage() {
         <div className="order-1 flex items-start justify-center lg:order-2">
           <div className="card animate-fade-up w-full overflow-hidden p-2 md:p-3" style={{ animationDelay: '120ms' }}>
             <div className="aspect-[4/5] w-full">
-              <AvatarCanvas pose={currentPose} width="100%" height="100%" />
+              <AvatarCanvas pose={currentPose} vrmPose={currentVRMPose} width="100%" height="100%" />
             </div>
           </div>
         </div>

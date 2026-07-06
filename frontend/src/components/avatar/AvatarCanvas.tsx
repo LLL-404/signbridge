@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import type { BonePose } from '@/types/avatar';
+import type { BonePose, VRMPose } from '@/types/avatar';
 import { useAvatarStore } from '@/stores/avatarStore';
 
 const Avatar3D = lazy(() => import('./Avatar3D'));
@@ -20,6 +20,8 @@ function hasWebGL(): boolean {
 
 export interface AvatarCanvasProps {
   pose?: BonePose;
+  /** VRM 标准姿态（新骨骼轨道，3D VRM 模式下优先使用） */
+  vrmPose?: VRMPose;
   width?: SizeProp;
   height?: SizeProp;
   className?: string;
@@ -102,6 +104,7 @@ function useContainerSize(containerRef: React.RefObject<HTMLDivElement | null>) 
 
 export default function AvatarCanvas({
   pose,
+  vrmPose,
   width = '100%',
   height = '100%',
   className,
@@ -142,6 +145,7 @@ export default function AvatarCanvas({
           >
             <Avatar3D
               pose={pose}
+              vrmPose={vrmPose}
               width="100%"
               height="100%"
               containerStyle={{ width: '100%', height: '100%' }}
