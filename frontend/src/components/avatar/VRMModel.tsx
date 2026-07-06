@@ -145,18 +145,21 @@ function driveHandFingers(
 }
 
 /** 标准人体比例（与 AvatarDriver VRM_LOCATION_OFFSETS 一致） */
-const STANDARD_SHOULDER_HEIGHT = 0.50;
+const STANDARD_SHOULDER_Y = 0.50;
+const STANDARD_HEAD_TOP_Y = 0.80;
 const STANDARD_SHOULDER_HALF_WIDTH = 0.22;
 
 /** 缓存每个 VRM 模型原始 hips 本地位置，避免被覆盖 */
 const ORIGINAL_HIPS_POS = new WeakMap<VRM, THREE.Vector3>();
 
-/** 缓存每个 VRM 模型的实际尺寸比例（肩高、肩宽半幅），用于缩放 HandLocation 偏移 */
+/** 缓存每个 VRM 模型的实际尺寸比例（肩高、肩宽半幅、头顶高），用于缩放 HandLocation 偏移 */
 interface ModelScale {
-  /** hips 到肩的实际高度（世界坐标 Y 差，米） */
-  shoulderHeight: number;
+  /** hips 到肩峰的实际高度（世界坐标 Y 差，米） */
+  shoulderY: number;
   /** 实际肩宽半幅（世界坐标 |X|，米） */
   shoulderHalfWidth: number;
+  /** hips 到头顶的实际高度（世界坐标 Y 差，米） */
+  headTopY: number;
 }
 const MODEL_SCALE = new WeakMap<VRM, ModelScale>();
 
@@ -182,16 +185,38 @@ function getModelScale(vrm: VRM): ModelScale {
   const hipsNode = humanoid.getRawBoneNode('hips' as never);
   const leftShoulder = humanoid.getRawBoneNode('leftShoulder' as never);
   const rightShoulder = humanoid.getRawBoneNode('rightShoulder' as never);
+  const headNode = humanoid.getRawBoneNode('head' as never);
   const hipsWorld = getBoneWorldPos(hipsNode, new THREE.Vector3());
   const leftWorld = getBoneWorldPos(leftShoulder, new THREE.Vector3());
   const rightWorld = getBoneWorldPos(rightShoulder, new THREE.Vector3());
-  // 肩高 = 左肩 Y - hips Y（左右肩 Y 应接近，取左肩）
-  const shoulderHeight = Math.abs(leftWorld.y - hipsWorld.y) || STANDARD_SHOULDER_HEIGHT;
+  // head 骨骼位置 + 估算头顶偏移（head 骨骼到头顶约 0.10m）
+  const headWorld = getBoneWorldPos(headNode, new THREE.Vector3());
+  // 肩峰 Y = 左右肩 Y 的平均值
+  const shoulderY = Math.abs(((leftWorld.y + rightWorld.y) / 2) - hipsWorld.y) || STANDARD_SHOULDER_Y;
   // 肩宽半幅 = |右肩 X - 左肩 X| / 2
   const shoulderHalfWidth = Math.abs(rightWorld.x - leftWorld.x) / 2 || STANDARD_SHOULDER_HALF_WIDTH;
-  const scale: ModelScale = { shoulderHeight, shoulderHalfWidth };
+  // 头顶 Y = head 骨骼 Y + 0.10（head 到头顶的估算距离）
+  const headTopY = Math.abs(headWorld.y - hipsWorld.y) + 0.10 || STANDARD_HEAD_TOP_Y;
+  const scale: ModelScale = { shoulderY, shoulderHalfWidth, headTopY };
   MODEL_SCALE.set(vrm, scale);
   return scale;
+}
+
+/**
+ * Y 轴分区间缩放：适配不同头身比
+ * - y ≤ STANDARD_SHOULDER_Y (0.50)：肩及以下，按"实际肩高/标准肩高"缩放
+ * - y > STANDARD_SHOULDER_Y：肩以上，在 [肩, 头顶] 区间插值
+ *   归一化 t = (y - 0.50) / (0.80 - 0.50)
+ *   实际 y = 实际肩高 + t * (实际头顶高 - 实际肩高)
+ */
+function scaleOffsetY(y: number, scale: ModelScale): number {
+  if (y <= STANDARD_SHOULDER_Y) {
+    // 肩及以下：按肩高比例缩放（含负值如 NEUTRAL 下垂）
+    return y * (scale.shoulderY / STANDARD_SHOULDER_Y);
+  }
+  // 肩以上：在 [肩, 头顶] 区间插值
+  const t = (y - STANDARD_SHOULDER_Y) / (STANDARD_HEAD_TOP_Y - STANDARD_SHOULDER_Y);
+  return scale.shoulderY + t * (scale.headTopY - scale.shoulderY);
 }
 
 /**
@@ -230,8 +255,7 @@ function applyVRMPose(
   const originalHips = ORIGINAL_HIPS_POS.get(vrm) ?? new THREE.Vector3(0, 0.9, 0);
   // 读取模型实际尺寸比例（首次计算后缓存）
   const scale = getModelScale(vrm);
-  // Y/X 缩放因子：模型实际尺寸 / 标准尺寸
-  const yScale = scale.shoulderHeight / STANDARD_SHOULDER_HEIGHT;
+  // X 缩放因子：模型实际肩宽半幅 / 标准肩宽半幅
   const xScale = scale.shoulderHalfWidth / STANDARD_SHOULDER_HALF_WIDTH;
 
   // ===== 1. 显式骨骼 rotation（含 retarget + smooth）=====
@@ -257,8 +281,8 @@ function applyVRMPose(
     // 读取真实 hips 世界位置，作为偏移的基准点
     const hipsWorld = getBoneWorldPos(hipsNode, new THREE.Vector3());
 
-    // 将"相对 hips 的归一化偏移"转换为模型场景本地坐标：
-    //   1. 按模型实际肩高/肩宽缩放偏移（适配不同身高模型）
+    // 将"相对 hips 的偏移"转换为模型场景本地坐标：
+    //   1. Y 轴分区间缩放（肩及以下按肩高，肩以上按头高），X 轴按肩宽缩放
     //   2. 本地偏移转到世界方向（含场景旋转，避免 +Z 前方被反转）
     //   3. realWorld = hipsWorld + worldOffset（转到模型世界坐标）
     //   4. targetLocal = scene.worldToLocal(realWorld)（消除场景变换，回到本地）
@@ -266,7 +290,7 @@ function applyVRMPose(
     const toSceneLocal = (offset: { x: number; y: number; z: number }): THREE.Vector3 => {
       const scaled = new THREE.Vector3(
         offset.x * xScale,
-        offset.y * yScale,
+        scaleOffsetY(offset.y, scale),
         offset.z, // Z 深度不缩放（绝对值，与身高无关）
       );
       // 本地偏移（+Z 为模型前方）→ 世界方向（含 scene.rotation.y=PI 等变换）

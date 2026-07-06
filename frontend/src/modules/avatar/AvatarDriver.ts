@@ -487,37 +487,41 @@ export class AvatarDriver {
 // ===== VRM 关键帧动作生成（静态/直线）=====
 
 /**
- * HandLocation → 手部 IK 目标"相对 hips 的归一化偏移"（单位：米）
+ * HandLocation → 手部 IK 目标"相对 hips 的偏移"（单位：米，标准人体比例）
  *
  * 坐标体系（VRM 标准模型本地坐标，+Y 向上，+Z 为前方，+X 为模型右侧）：
  *   - 原点 (0,0,0) = hips 位置
- *   - Y 轴：向上为正，基于成人人体测量学比例
- *       腰 ≈ +0.10, 腹 ≈ +0.20, 胸 ≈ +0.35, 颈 ≈ +0.45,
- *       下巴 ≈ +0.52, 嘴 ≈ +0.55, 脸中(鼻) ≈ +0.58,
- *       眼 ≈ +0.62, 额 ≈ +0.68, 头顶 ≈ +0.72
+ *   - Y 轴：向上为正，基于成人人体测量学比例（hips 到头顶约 0.80m）
+ *       腰 ≈ +0.10, 腹 ≈ +0.20, 胸 ≈ +0.35, 肩峰 ≈ +0.50,
+ *       下巴 ≈ +0.55, 嘴 ≈ +0.60, 鼻尖 ≈ +0.63,
+ *       眼 ≈ +0.66, 额 ≈ +0.70, 头顶 ≈ +0.80
+ *       NEUTRAL 手自然下垂 ≈ -0.10（手腕在大腿旁）
  *   - X 轴：模型右侧为正（左手 = -X，右手 = +X）
- *       肩宽半幅 ≈ ±0.22, 胸宽半幅 ≈ ±0.18
+ *       肩宽半幅 ≈ ±0.22, 胸宽半幅 ≈ ±0.18, 头宽半幅 ≈ ±0.09
  *   - Z 轴：前方为正，深度按部位前突程度
- *       肩前 ≈ +0.06, 胸前 ≈ +0.16, 脸前(鼻) ≈ +0.22
+ *       肩前 ≈ +0.06, 胸前 ≈ +0.16, 腹前(肚) ≈ +0.20,
+ *       下巴前 ≈ +0.18, 嘴前 ≈ +0.20, 鼻尖 ≈ +0.22,
+ *       眼前 ≈ +0.20, 额前 ≈ +0.16
  *
- * 这些偏移在 applyVRMPose 里会按模型实际骨骼尺寸缩放：
- *   Y 缩放 = 模型实际肩高 / 标准肩高(0.50)
- *   X 缩放 = 模型实际肩宽半幅 / 标准肩宽(0.22)
+ * Y 轴缩放策略（applyVRMPose 实现，适配不同头身比）：
+ *   - y ≤ 0.50（肩及以下）：按"模型实际肩高 / 标准肩高(0.50)"缩放
+ *   - y > 0.50（肩以上）：在 [肩, 头顶] 区间插值，用模型实际头高
+ *   这样 Q版大头模型和写实模型的脸部位置都准确
  */
 const VRM_LOCATION_OFFSETS: Record<HandLocation, Vec3> = {
-  [HandLocation.NEUTRAL]:        { x: 0,     y: 0.10, z: 0.15 }, // 腰前自然位
-  [HandLocation.WAIST_LEVEL]:    { x: 0,     y: 0.10, z: 0.12 },
-  [HandLocation.ABDOMEN_LEVEL]:  { x: 0,     y: 0.20, z: 0.14 }, // 腹前
-  [HandLocation.CHEST_CENTER]:   { x: 0,     y: 0.35, z: 0.16 }, // 胸前
-  [HandLocation.CHEST_LEFT]:     { x: -0.18, y: 0.35, z: 0.16 },
-  [HandLocation.CHEST_RIGHT]:    { x: 0.18,  y: 0.35, z: 0.16 },
-  [HandLocation.SHOULDER_LEFT]:  { x: -0.22, y: 0.50, z: 0.06 }, // 肩前略凸
-  [HandLocation.SHOULDER_RIGHT]: { x: 0.22,  y: 0.50, z: 0.06 },
-  [HandLocation.CHIN_LEVEL]:     { x: 0,     y: 0.52, z: 0.20 }, // 下巴前
-  [HandLocation.MOUTH_LEVEL]:    { x: 0,     y: 0.55, z: 0.22 }, // 嘴前
-  [HandLocation.FACE_LEVEL]:     { x: 0,     y: 0.58, z: 0.22 }, // 脸中（鼻尖）
-  [HandLocation.EYE_LEVEL]:      { x: 0,     y: 0.62, z: 0.20 }, // 眼前
-  [HandLocation.FOREHEAD_LEVEL]: { x: 0,     y: 0.68, z: 0.18 }, // 额前
+  [HandLocation.NEUTRAL]:        { x: 0,     y: -0.10, z: 0.10 }, // 手自然下垂（手腕在大腿旁）
+  [HandLocation.WAIST_LEVEL]:    { x: 0,     y: 0.10,  z: 0.12 }, // 腰前
+  [HandLocation.ABDOMEN_LEVEL]:  { x: 0,     y: 0.20,  z: 0.20 }, // 腹前（肚子最前突）
+  [HandLocation.CHEST_CENTER]:   { x: 0,     y: 0.35,  z: 0.16 }, // 胸前
+  [HandLocation.CHEST_LEFT]:     { x: -0.18, y: 0.35,  z: 0.16 },
+  [HandLocation.CHEST_RIGHT]:    { x: 0.18,  y: 0.35,  z: 0.16 },
+  [HandLocation.SHOULDER_LEFT]:  { x: -0.22, y: 0.50,  z: 0.06 }, // 肩前略凸
+  [HandLocation.SHOULDER_RIGHT]: { x: 0.22,  y: 0.50,  z: 0.06 },
+  [HandLocation.CHIN_LEVEL]:     { x: 0,     y: 0.55,  z: 0.18 }, // 下巴前
+  [HandLocation.MOUTH_LEVEL]:    { x: 0,     y: 0.60,  z: 0.20 }, // 嘴前
+  [HandLocation.FACE_LEVEL]:     { x: 0,     y: 0.63,  z: 0.22 }, // 脸中（鼻尖最前突）
+  [HandLocation.EYE_LEVEL]:      { x: 0,     y: 0.66,  z: 0.20 }, // 眼前
+  [HandLocation.FOREHEAD_LEVEL]: { x: 0,     y: 0.70,  z: 0.16 }, // 额前
 };
 
 /**
