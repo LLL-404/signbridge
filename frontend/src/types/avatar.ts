@@ -23,7 +23,11 @@ export interface HandPose {
   fingers: [JointPose, JointPose, JointPose, JointPose, JointPose];
 }
 
-/** 完整身体姿态（一帧） */
+/**
+ * 完整身体姿态（一帧）
+ * @deprecated 旧骨骼姿态结构（17 自创关节名），将被 VRMPose 替代。
+ * 保留供双轨过渡期回退使用，新代码请用 VRMPose。
+ */
 export interface BonePose {
   root: JointPose;
   spine: JointPose;
@@ -140,4 +144,64 @@ export const NEUTRAL_POSE: BonePose = {
   right_hand: neutralHand('right'),
   expression: FacialExpression.NEUTRAL,
   head_movement: HeadMovement.NONE,
+};
+
+// ===== VRM Humanoid 标准骨骼（重建后唯一真相源）=====
+
+/** VRM humanoid 标准骨骼名（与 VRM 0.x/1.0 规范一致） */
+export type VRMBoneName =
+  // 躯干
+  | 'hips' | 'spine' | 'chest' | 'upperChest' | 'neck' | 'head'
+  // 左臂
+  | 'leftShoulder' | 'leftUpperArm' | 'leftLowerArm' | 'leftHand'
+  // 右臂
+  | 'rightShoulder' | 'rightUpperArm' | 'rightLowerArm' | 'rightHand'
+  // 左腿
+  | 'leftUpperLeg' | 'leftLowerLeg' | 'leftFoot' | 'leftToes'
+  // 右腿
+  | 'rightUpperLeg' | 'rightLowerLeg' | 'rightFoot' | 'rightToes';
+
+/** 单个骨骼的变换：rotation 为主，position 可选 */
+export interface BoneTransform {
+  rotation: Vec3;      // 欧拉角弧度，FK 链核心
+  position?: Vec3;     // 可选，仅 hips（根位移）和 IK 目标使用
+}
+
+/** 一帧完整 VRM 姿态 */
+export interface VRMPose {
+  bones: Partial<Record<VRMBoneName, BoneTransform>>;
+  expression?: FacialExpression;
+  headMovement?: HeadMovement;
+  /** IK 目标（可选，指定后覆盖 FK 结果） */
+  ikTargets?: {
+    leftHand?: Vec3;
+    rightHand?: Vec3;
+    leftFoot?: Vec3;
+    rightFoot?: Vec3;
+  };
+  /** 手形（驱动手指骨骼） */
+  handShapes?: { left?: HandShape; right?: HandShape };
+}
+
+/** 关键帧（用于动作序列） */
+export interface Keyframe {
+  time: number;  // 0~1 归一化时间
+  pose: VRMPose;
+}
+
+/** 一个词汇的动作 = 关键帧序列 */
+export interface SignMotion {
+  gloss_id: string;
+  keyframes: Keyframe[];
+  duration_ms: number;
+  loop: boolean;
+}
+
+/** VRM 中性姿态（T-pose 零旋转，仅 hips 设根位置） */
+export const NEUTRAL_VRM_POSE: VRMPose = {
+  bones: {
+    hips: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 1.0, z: 0 } },
+  },
+  expression: FacialExpression.NEUTRAL,
+  headMovement: HeadMovement.NONE,
 };
