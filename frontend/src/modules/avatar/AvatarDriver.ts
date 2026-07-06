@@ -1,13 +1,14 @@
 // 虚拟人动作驱动引擎
 // 接收词汇序列（GlossSequence），编排播放：获取/生成动作数据、词汇间过渡、附加非手动标记
-import type { BonePose, Frame, JointPose, MotionData, Vec3, HandPose } from '@/types/avatar';
-import { NEUTRAL_POSE } from '@/types/avatar';
+import type { BonePose, Frame, JointPose, MotionData, Vec3, HandPose, SignMotion, Keyframe, VRMPose } from '@/types/avatar';
+import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
 import type { GlossSequence, NonManualMark } from '@/types/grammar';
 import {
   HandShape,
   HandLocation,
   FacialExpression,
   HeadMovement,
+  Movement,
 } from '@/types/sign';
 import type { HandShapeDefinition, SignGloss } from '@/types/sign';
 import { MotionPlayer } from './MotionPlayer';
@@ -414,4 +415,94 @@ export class AvatarDriver {
     if (cb) cb();
     if (resolve) resolve();
   }
+}
+
+// ===== VRM 关键帧动作生成（静态/直线）=====
+
+/** HandLocation → 手部 IK 目标世界坐标（与旧 LOCATION_POSITIONS 一致） */
+const VRM_LOCATION_POSITIONS: Record<HandLocation, Vec3> = {
+  [HandLocation.NEUTRAL]: { x: 0, y: 0.95, z: 0.15 },
+  [HandLocation.CHEST_CENTER]: { x: 0, y: 1.35, z: 0.12 },
+  [HandLocation.CHEST_LEFT]: { x: -0.18, y: 1.35, z: 0.12 },
+  [HandLocation.CHEST_RIGHT]: { x: 0.18, y: 1.35, z: 0.12 },
+  [HandLocation.SHOULDER_LEFT]: { x: -0.22, y: 1.40, z: 0 },
+  [HandLocation.SHOULDER_RIGHT]: { x: 0.22, y: 1.40, z: 0 },
+  [HandLocation.FACE_LEVEL]: { x: 0, y: 1.52, z: 0.18 },
+  [HandLocation.EYE_LEVEL]: { x: 0, y: 1.58, z: 0.18 },
+  [HandLocation.MOUTH_LEVEL]: { x: 0, y: 1.50, z: 0.18 },
+  [HandLocation.CHIN_LEVEL]: { x: 0, y: 1.45, z: 0.15 },
+  [HandLocation.FOREHEAD_LEVEL]: { x: 0, y: 1.65, z: 0.18 },
+  [HandLocation.ABDOMEN_LEVEL]: { x: 0, y: 1.15, z: 0.10 },
+  [HandLocation.WAIST_LEVEL]: { x: 0, y: 1.00, z: 0.10 },
+};
+
+/** 获取手部 IK 目标位置，NEUTRAL 时按主导手调整 x */
+function getHandTarget(loc: HandLocation, dominant: 'left' | 'right'): Vec3 {
+  const base = VRM_LOCATION_POSITIONS[loc] ?? VRM_LOCATION_POSITIONS[HandLocation.NEUTRAL];
+  if (loc === HandLocation.NEUTRAL) {
+    return { x: dominant === 'left' ? -0.20 : 0.20, y: base.y, z: base.z };
+  }
+  return { ...base };
+}
+
+/** 根据 movement 构建关键帧的 IK 目标 */
+function buildKeyframePose(
+  handTarget: Vec3,
+  dominant: 'left' | 'right',
+  shape: HandShape,
+  expression?: string,
+  headMovement?: string,
+): VRMPose {
+  const ikKey = dominant === 'left' ? 'leftHand' : 'rightHand';
+  return {
+    ...NEUTRAL_VRM_POSE,
+    ikTargets: { [ikKey]: handTarget } as VRMPose['ikTargets'],
+    handShapes: { [dominant]: shape } as VRMPose['handShapes'],
+    expression: expression as any,
+    headMovement: headMovement as any,
+  };
+}
+
+/**
+ * 根据 SignGloss 生成关键帧动作序列
+ * 阶段 1：支持静态和直线运动
+ */
+export function generateMotion(gloss: SignGloss): SignMotion {
+  const m = gloss.manual;
+  const dominant = m.dominant_hand;
+  const shapeStart = parseHandShape(m.handshape_start);
+  const shapeEnd = parseHandShape(m.handshape_end);
+  const locStart = parseHandLocation(m.location_start);
+  const locEnd = parseHandLocation(m.location_end);
+  const movement = m.movement;
+
+  const startTarget = getHandTarget(locStart, dominant);
+  const endTarget = getHandTarget(locEnd, dominant);
+  const expr = gloss.non_manual?.expression;
+  const head = gloss.non_manual?.head_movement;
+
+  const keyframes: Keyframe[] = [];
+
+  if (movement === Movement.STATIC) {
+    // 静态：2 帧（起手形 @ location）
+    keyframes.push({ time: 0, pose: buildKeyframePose(startTarget, dominant, shapeStart, expr, head) });
+    keyframes.push({ time: 1, pose: buildKeyframePose(startTarget, dominant, shapeEnd, expr, head) });
+  } else {
+    // 直线运动：3 帧（起/中/终）
+    const midTarget: Vec3 = {
+      x: (startTarget.x + endTarget.x) / 2,
+      y: (startTarget.y + endTarget.y) / 2,
+      z: (startTarget.z + endTarget.z) / 2,
+    };
+    keyframes.push({ time: 0, pose: buildKeyframePose(startTarget, dominant, shapeStart, expr, head) });
+    keyframes.push({ time: 0.5, pose: buildKeyframePose(midTarget, dominant, shapeStart, expr, head) });
+    keyframes.push({ time: 1, pose: buildKeyframePose(endTarget, dominant, shapeEnd, expr, head) });
+  }
+
+  return {
+    gloss_id: gloss.gloss_id,
+    keyframes,
+    duration_ms: gloss.duration_ms > 0 ? gloss.duration_ms : DEFAULT_DURATION_MS,
+    loop: false,
+  };
 }
