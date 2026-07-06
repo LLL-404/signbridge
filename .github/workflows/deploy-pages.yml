@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main, master, "trae/solo-agent-7YzVFE"]
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
