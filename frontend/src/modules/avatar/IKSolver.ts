@@ -125,3 +125,35 @@ export function solve(
     elbowRotation: { x: elbowAngle, y: 0, z: 0 },
   };
 }
+
+/** 下肢 IK 求解结果 */
+export interface LegIKResult {
+  /** 髋旋转（欧拉 XYZ，弧度） */
+  hipRotation: Vec3;
+  /** 膝旋转（铰链，仅 X） */
+  kneeRotation: Vec3;
+}
+
+/**
+ * 2 段下肢 IK
+ * @param hipPos 髋部世界位置
+ * @param ankleTargetPos 脚踝目标世界位置
+ * @param thighLength 大腿长（髋→膝）
+ * @param shinLength 小腿长（膝→踝）
+ * 膝盖为铰链关节。下肢骨骼 rest 方向（沿 -Y 延伸）与上肢一致，
+ * 因此膝盖屈曲在本地 X 轴上与肘部屈曲同号，直接复用 solve 的肘部角度。
+ */
+export function solveLeg(
+  hipPos: Vec3,
+  ankleTargetPos: Vec3,
+  thighLength: number,
+  shinLength: number,
+): LegIKResult {
+  // 复用上肢 solve 的 2 段 IK 几何逻辑
+  const armResult = solve(hipPos, ankleTargetPos, thighLength, shinLength, 'right');
+  // 下肢与上肢 rest 方向一致（均沿 -Y），膝盖屈曲角与肘部屈曲角同号
+  return {
+    hipRotation: armResult.shoulderRotation,
+    kneeRotation: { x: armResult.elbowRotation.x, y: 0, z: 0 },
+  };
+}

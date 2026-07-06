@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { solve } from './IKSolver';
+import { solve, solveLeg } from './IKSolver';
 
 describe('IKSolver', () => {
   it('目标在臂长范围内应返回有效解', () => {
@@ -99,5 +99,38 @@ describe('IKSolver', () => {
     expect(result.shoulderRotation.z).toBeLessThanOrEqual(Math.PI);
     expect(result.elbowRotation.x).toBeGreaterThanOrEqual(-Math.PI);
     expect(result.elbowRotation.x).toBeLessThanOrEqual(Math.PI);
+  });
+});
+
+describe('solveLeg (下肢 IK)', () => {
+  it('目标在腿长范围内应返回有效解', () => {
+    const result = solveLeg(
+      { x: 0, y: 1.0, z: 0 },    // 髋
+      { x: 0, y: 0.1, z: 0 },    // 脚踝目标
+      0.46,                        // 大腿长
+      0.48,                        // 小腿长
+    );
+    expect(result.hipRotation).toBeDefined();
+    expect(result.kneeRotation).toBeDefined();
+    expect(Number.isFinite(result.kneeRotation.x)).toBe(true);
+  });
+
+  it('目标距离超过总腿长应被钳制（不产生 NaN）', () => {
+    const result = solveLeg(
+      { x: 0, y: 1.0, z: 0 },
+      { x: 0, y: -10, z: 0 },
+      0.46, 0.48,
+    );
+    expect(Number.isNaN(result.hipRotation.x)).toBe(false);
+    expect(Number.isNaN(result.kneeRotation.x)).toBe(false);
+  });
+
+  it('膝盖弯曲方向应为正向屈曲（X 轴正角）', () => {
+    const result = solveLeg(
+      { x: 0, y: 1.0, z: 0 },
+      { x: 0, y: 0.1, z: 0.1 },  // 脚向前
+      0.46, 0.48,
+    );
+    expect(result.kneeRotation.x).toBeGreaterThan(0);
   });
 });
