@@ -144,10 +144,21 @@ function driveHandFingers(
   }
 }
 
-/** AvatarDriver 假设的 hips 世界坐标（HandLocation 坐标体系基准） */
-const ASSUMED_HIPS = new THREE.Vector3(0, 1.0, 0);
-/** 缓存每个 VRM 模型原始 hips 本地位置，避免被 NEUTRAL_POSE 覆盖 */
+/** 标准人体比例（与 AvatarDriver VRM_LOCATION_OFFSETS 一致） */
+const STANDARD_SHOULDER_HEIGHT = 0.50;
+const STANDARD_SHOULDER_HALF_WIDTH = 0.22;
+
+/** 缓存每个 VRM 模型原始 hips 本地位置，避免被覆盖 */
 const ORIGINAL_HIPS_POS = new WeakMap<VRM, THREE.Vector3>();
+
+/** 缓存每个 VRM 模型的实际尺寸比例（肩高、肩宽半幅），用于缩放 HandLocation 偏移 */
+interface ModelScale {
+  /** hips 到肩的实际高度（世界坐标 Y 差，米） */
+  shoulderHeight: number;
+  /** 实际肩宽半幅（世界坐标 |X|，米） */
+  shoulderHalfWidth: number;
+}
+const MODEL_SCALE = new WeakMap<VRM, ModelScale>();
 
 /** 读取骨骼世界位置 */
 function getBoneWorldPos(node: THREE.Object3D | null, out: THREE.Vector3): THREE.Vector3 {
@@ -163,15 +174,38 @@ function getBoneLength(childNode: THREE.Object3D | null, fallback: number): numb
   return len > 0.001 && len < 2.0 ? len : fallback;
 }
 
+/** 首次调用时从模型真实骨骼读取尺寸比例，后续从缓存取 */
+function getModelScale(vrm: VRM): ModelScale {
+  const cached = MODEL_SCALE.get(vrm);
+  if (cached) return cached;
+  const humanoid = vrm.humanoid;
+  const hipsNode = humanoid.getRawBoneNode('hips' as never);
+  const leftShoulder = humanoid.getRawBoneNode('leftShoulder' as never);
+  const rightShoulder = humanoid.getRawBoneNode('rightShoulder' as never);
+  const hipsWorld = getBoneWorldPos(hipsNode, new THREE.Vector3());
+  const leftWorld = getBoneWorldPos(leftShoulder, new THREE.Vector3());
+  const rightWorld = getBoneWorldPos(rightShoulder, new THREE.Vector3());
+  // 肩高 = 左肩 Y - hips Y（左右肩 Y 应接近，取左肩）
+  const shoulderHeight = Math.abs(leftWorld.y - hipsWorld.y) || STANDARD_SHOULDER_HEIGHT;
+  // 肩宽半幅 = |右肩 X - 左肩 X| / 2
+  const shoulderHalfWidth = Math.abs(rightWorld.x - leftWorld.x) / 2 || STANDARD_SHOULDER_HALF_WIDTH;
+  const scale: ModelScale = { shoulderHeight, shoulderHalfWidth };
+  MODEL_SCALE.set(vrm, scale);
+  return scale;
+}
+
 /**
  * 应用 VRMPose 到 VRM 模型（新骨骼驱动路径）
  *
+ * 坐标体系约定：
+ *   - VRMPose.ikTargets 存"相对 hips 的归一化偏移"（单位：米，基于标准人体比例）
+ *   - VRMPose.bones.hips.position 存"相对模型原始 hips 位置的偏移"
+ *
  * 三部分：
  *   1. 显式骨骼 rotation：遍历 pose.bones，retarget + smooth 后写入 node.rotation
- *      hips.position 用"原始 + 偏移"避免覆盖模型 rest pose
- *   2. IK 目标反算：运行时读取真实肩部/髋部世界位置与骨骼长度，
- *      将 AvatarDriver 假设坐标（hips 在 y=1.0）转换到模型场景本地坐标，
- *      保证 IK 几何与模型实际骨骼一致
+ *      hips.position 直接当相对偏移叠加到模型原始 hips 本地位置
+ *   2. IK 目标反算：按模型实际肩高/肩宽缩放偏移，
+ *      realWorld = hipsWorld + scaledOffset，再 scene.worldToLocal 转本地坐标
  *   3. 手形驱动：pose.handShapes 指定时，用 handShapeToBoneRotations 写入手指骨骼
  *
  * @param vrm VRM 模型实例
@@ -194,6 +228,11 @@ function applyVRMPose(
     ORIGINAL_HIPS_POS.set(vrm, hipsNode.position.clone());
   }
   const originalHips = ORIGINAL_HIPS_POS.get(vrm) ?? new THREE.Vector3(0, 0.9, 0);
+  // 读取模型实际尺寸比例（首次计算后缓存）
+  const scale = getModelScale(vrm);
+  // Y/X 缩放因子：模型实际尺寸 / 标准尺寸
+  const yScale = scale.shoulderHeight / STANDARD_SHOULDER_HEIGHT;
+  const xScale = scale.shoulderHalfWidth / STANDARD_SHOULDER_HALF_WIDTH;
 
   // ===== 1. 显式骨骼 rotation（含 retarget + smooth）=====
   for (const [boneName, transform] of Object.entries(pose.bones)) {
@@ -203,39 +242,36 @@ function applyVRMPose(
     const retargeted = retargetRotation(vrmBoneName, transform.rotation);
     const smoothed = smoother.smooth(vrmBoneName, retargeted, timestamp);
     node.rotation.set(smoothed.x, smoothed.y, smoothed.z);
-    // hips 位移：用"原始 + 偏移"避免覆盖模型 rest pose
-    // AvatarDriver 的 hips.position 是假设坐标系（hips 在 y=1.0），
-    // 转换为相对原始位置的偏移后应用
+    // hips 位移：position 是"相对模型原始 hips 位置的偏移"，直接叠加
     if (transform.position && vrmBoneName === 'hips') {
-      const offset = new THREE.Vector3(
-        transform.position.x - ASSUMED_HIPS.x,
-        transform.position.y - ASSUMED_HIPS.y,
-        transform.position.z - ASSUMED_HIPS.z,
-      );
       node.position.set(
-        originalHips.x + offset.x,
-        originalHips.y + offset.y,
-        originalHips.z + offset.z,
+        originalHips.x + transform.position.x,
+        originalHips.y + transform.position.y,
+        originalHips.z + transform.position.z,
       );
     }
   }
 
-  // ===== 2. IK 目标反算（基于模型真实几何）=====
+  // ===== 2. IK 目标反算（基于模型真实几何 + 比例缩放）=====
   if (pose.ikTargets) {
-    // 读取真实 hips 世界位置，作为 AvatarDriver 坐标系到模型世界坐标的基准
+    // 读取真实 hips 世界位置，作为偏移的基准点
     const hipsWorld = getBoneWorldPos(hipsNode, new THREE.Vector3());
 
-    // 将 AvatarDriver 假设的世界坐标目标转换到模型场景本地坐标
-    // 步骤：realWorld = hipsWorld + (target - ASSUMED_HIPS)
-    //       targetLocal = scene.worldToLocal(realWorld)
-    // 这样消除场景 rotation.y=PI 和 position.y=-0.9 的影响，IK 在本地坐标工作
-    const toSceneLocal = (target: { x: number; y: number; z: number }): THREE.Vector3 => {
-      const offset = new THREE.Vector3(
-        target.x - ASSUMED_HIPS.x,
-        target.y - ASSUMED_HIPS.y,
-        target.z - ASSUMED_HIPS.z,
+    // 将"相对 hips 的归一化偏移"转换为模型场景本地坐标：
+    //   1. 按模型实际肩高/肩宽缩放偏移（适配不同身高模型）
+    //   2. 本地偏移转到世界方向（含场景旋转，避免 +Z 前方被反转）
+    //   3. realWorld = hipsWorld + worldOffset（转到模型世界坐标）
+    //   4. targetLocal = scene.worldToLocal(realWorld)（消除场景变换，回到本地）
+    const sceneQuat = scene.quaternion;
+    const toSceneLocal = (offset: { x: number; y: number; z: number }): THREE.Vector3 => {
+      const scaled = new THREE.Vector3(
+        offset.x * xScale,
+        offset.y * yScale,
+        offset.z, // Z 深度不缩放（绝对值，与身高无关）
       );
-      const realWorld = hipsWorld.clone().add(offset);
+      // 本地偏移（+Z 为模型前方）→ 世界方向（含 scene.rotation.y=PI 等变换）
+      const worldOffset = scaled.applyQuaternion(sceneQuat);
+      const realWorld = hipsWorld.clone().add(worldOffset);
       return scene.worldToLocal(realWorld);
     };
 

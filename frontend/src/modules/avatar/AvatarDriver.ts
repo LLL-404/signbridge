@@ -486,26 +486,46 @@ export class AvatarDriver {
 
 // ===== VRM 关键帧动作生成（静态/直线）=====
 
-/** HandLocation → 手部 IK 目标世界坐标（与旧 LOCATION_POSITIONS 一致） */
-const VRM_LOCATION_POSITIONS: Record<HandLocation, Vec3> = {
-  [HandLocation.NEUTRAL]: { x: 0, y: 0.95, z: 0.15 },
-  [HandLocation.CHEST_CENTER]: { x: 0, y: 1.35, z: 0.12 },
-  [HandLocation.CHEST_LEFT]: { x: -0.18, y: 1.35, z: 0.12 },
-  [HandLocation.CHEST_RIGHT]: { x: 0.18, y: 1.35, z: 0.12 },
-  [HandLocation.SHOULDER_LEFT]: { x: -0.22, y: 1.40, z: 0 },
-  [HandLocation.SHOULDER_RIGHT]: { x: 0.22, y: 1.40, z: 0 },
-  [HandLocation.FACE_LEVEL]: { x: 0, y: 1.52, z: 0.18 },
-  [HandLocation.EYE_LEVEL]: { x: 0, y: 1.58, z: 0.18 },
-  [HandLocation.MOUTH_LEVEL]: { x: 0, y: 1.50, z: 0.18 },
-  [HandLocation.CHIN_LEVEL]: { x: 0, y: 1.45, z: 0.15 },
-  [HandLocation.FOREHEAD_LEVEL]: { x: 0, y: 1.65, z: 0.18 },
-  [HandLocation.ABDOMEN_LEVEL]: { x: 0, y: 1.15, z: 0.10 },
-  [HandLocation.WAIST_LEVEL]: { x: 0, y: 1.00, z: 0.10 },
+/**
+ * HandLocation → 手部 IK 目标"相对 hips 的归一化偏移"（单位：米）
+ *
+ * 坐标体系（VRM 标准模型本地坐标，+Y 向上，+Z 为前方，+X 为模型右侧）：
+ *   - 原点 (0,0,0) = hips 位置
+ *   - Y 轴：向上为正，基于成人人体测量学比例
+ *       腰 ≈ +0.10, 腹 ≈ +0.20, 胸 ≈ +0.35, 颈 ≈ +0.45,
+ *       下巴 ≈ +0.52, 嘴 ≈ +0.55, 脸中(鼻) ≈ +0.58,
+ *       眼 ≈ +0.62, 额 ≈ +0.68, 头顶 ≈ +0.72
+ *   - X 轴：模型右侧为正（左手 = -X，右手 = +X）
+ *       肩宽半幅 ≈ ±0.22, 胸宽半幅 ≈ ±0.18
+ *   - Z 轴：前方为正，深度按部位前突程度
+ *       肩前 ≈ +0.06, 胸前 ≈ +0.16, 脸前(鼻) ≈ +0.22
+ *
+ * 这些偏移在 applyVRMPose 里会按模型实际骨骼尺寸缩放：
+ *   Y 缩放 = 模型实际肩高 / 标准肩高(0.50)
+ *   X 缩放 = 模型实际肩宽半幅 / 标准肩宽(0.22)
+ */
+const VRM_LOCATION_OFFSETS: Record<HandLocation, Vec3> = {
+  [HandLocation.NEUTRAL]:        { x: 0,     y: 0.10, z: 0.15 }, // 腰前自然位
+  [HandLocation.WAIST_LEVEL]:    { x: 0,     y: 0.10, z: 0.12 },
+  [HandLocation.ABDOMEN_LEVEL]:  { x: 0,     y: 0.20, z: 0.14 }, // 腹前
+  [HandLocation.CHEST_CENTER]:   { x: 0,     y: 0.35, z: 0.16 }, // 胸前
+  [HandLocation.CHEST_LEFT]:     { x: -0.18, y: 0.35, z: 0.16 },
+  [HandLocation.CHEST_RIGHT]:    { x: 0.18,  y: 0.35, z: 0.16 },
+  [HandLocation.SHOULDER_LEFT]:  { x: -0.22, y: 0.50, z: 0.06 }, // 肩前略凸
+  [HandLocation.SHOULDER_RIGHT]: { x: 0.22,  y: 0.50, z: 0.06 },
+  [HandLocation.CHIN_LEVEL]:     { x: 0,     y: 0.52, z: 0.20 }, // 下巴前
+  [HandLocation.MOUTH_LEVEL]:    { x: 0,     y: 0.55, z: 0.22 }, // 嘴前
+  [HandLocation.FACE_LEVEL]:     { x: 0,     y: 0.58, z: 0.22 }, // 脸中（鼻尖）
+  [HandLocation.EYE_LEVEL]:      { x: 0,     y: 0.62, z: 0.20 }, // 眼前
+  [HandLocation.FOREHEAD_LEVEL]: { x: 0,     y: 0.68, z: 0.18 }, // 额前
 };
 
-/** 获取手部 IK 目标位置，NEUTRAL 时按主导手调整 x */
+/**
+ * 获取手部 IK 目标"相对 hips 的偏移"
+ * NEUTRAL 时按主导手调整 x（手自然下垂在身体一侧）
+ */
 function getHandTarget(loc: HandLocation, dominant: 'left' | 'right'): Vec3 {
-  const base = VRM_LOCATION_POSITIONS[loc] ?? VRM_LOCATION_POSITIONS[HandLocation.NEUTRAL];
+  const base = VRM_LOCATION_OFFSETS[loc] ?? VRM_LOCATION_OFFSETS[HandLocation.NEUTRAL];
   if (loc === HandLocation.NEUTRAL) {
     return { x: dominant === 'left' ? -0.20 : 0.20, y: base.y, z: base.z };
   }

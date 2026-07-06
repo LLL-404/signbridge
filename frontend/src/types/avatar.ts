@@ -197,10 +197,14 @@ export interface SignMotion {
   loop: boolean;
 }
 
-/** VRM 中性姿态（T-pose 零旋转，仅 hips 设根位置） */
+/**
+ * VRM 中性姿态（T-pose 零旋转，hips 无位移）
+ * 注意：hips.position 是"相对模型原始 hips 位置的偏移"，{0,0,0} 表示不位移。
+ * 其他骨骼的 rotation 均为零（rest pose）。ikTargets/handShapes 缺省为空。
+ */
 export const NEUTRAL_VRM_POSE: VRMPose = {
   bones: {
-    hips: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 1.0, z: 0 } },
+    hips: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } },
   },
   expression: FacialExpression.NEUTRAL,
   headMovement: HeadMovement.NONE,
