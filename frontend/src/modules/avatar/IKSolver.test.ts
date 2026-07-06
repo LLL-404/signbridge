@@ -134,3 +134,25 @@ describe('solveLeg (下肢 IK)', () => {
     expect(result.kneeRotation.x).toBeGreaterThan(0);
   });
 });
+
+import { solveSpine } from './IKSolver';
+
+describe('solveSpine (躯干弯曲)', () => {
+  it('前倾应产生 spine + chest 正向 X 旋转', () => {
+    const result = solveSpine('forward', 0.3);  // 前倾 0.3 弧度
+    expect(result.spine.x).toBeGreaterThan(0);
+    expect(result.chest.x).toBeGreaterThan(0);
+    expect(result.upperChest?.x).toBeGreaterThan(0);
+  });
+
+  it('侧弯应产生 Z 轴旋转', () => {
+    const result = solveSpine('left', 0.2);
+    expect(Math.abs(result.spine.z)).toBeGreaterThan(0);
+  });
+
+  it('零角度应返回零旋转', () => {
+    const result = solveSpine('forward', 0);
+    expect(result.spine.x).toBe(0);
+    expect(result.chest.x).toBe(0);
+  });
+});

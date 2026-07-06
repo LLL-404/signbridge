@@ -157,3 +157,55 @@ export function solveLeg(
     kneeRotation: { x: armResult.elbowRotation.x, y: 0, z: 0 },
   };
 }
+
+/** 躯干弯曲方向 */
+export type SpineBendDirection = 'forward' | 'backward' | 'left' | 'right';
+
+/** 躯干弯曲结果（spine/chest/upperChest 三段分配） */
+export interface SpineIKResult {
+  spine: Vec3;
+  chest: Vec3;
+  upperChest?: Vec3;
+}
+
+/**
+ * 躯干弯曲：将总弯曲角分配到 spine/chest/upperChest 三段
+ * @param direction 弯曲方向
+ * @param totalAngle 总弯曲角（弧度）
+ * 分配比例：spine 40%, chest 35%, upperChest 25%
+ */
+export function solveSpine(
+  direction: SpineBendDirection,
+  totalAngle: number,
+): SpineIKResult {
+  const spineAngle = totalAngle * 0.4;
+  const chestAngle = totalAngle * 0.35;
+  const upperChestAngle = totalAngle * 0.25;
+
+  const zero = { x: 0, y: 0, z: 0 };
+  const result: SpineIKResult = { spine: { ...zero }, chest: { ...zero }, upperChest: { ...zero } };
+
+  switch (direction) {
+    case 'forward':
+      result.spine.x = spineAngle;
+      result.chest.x = chestAngle;
+      result.upperChest!.x = upperChestAngle;
+      break;
+    case 'backward':
+      result.spine.x = -spineAngle;
+      result.chest.x = -chestAngle;
+      result.upperChest!.x = -upperChestAngle;
+      break;
+    case 'left':
+      result.spine.z = spineAngle;
+      result.chest.z = chestAngle;
+      result.upperChest!.z = upperChestAngle;
+      break;
+    case 'right':
+      result.spine.z = -spineAngle;
+      result.chest.z = -chestAngle;
+      result.upperChest!.z = -upperChestAngle;
+      break;
+  }
+  return result;
+}
