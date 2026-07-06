@@ -1,7 +1,7 @@
 // 动作播放器
 // 按 MotionData 驱动骨骼播放，支持帧间缓动插值、暂停/恢复、变速与循环
-import type { BonePose, Frame, JointPose, MotionData, Vec3, HandPose } from '@/types/avatar';
-import { NEUTRAL_POSE } from '@/types/avatar';
+import type { BonePose, Frame, JointPose, MotionData, Vec3, HandPose, SignMotion, VRMPose } from '@/types/avatar';
+import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
 
 /** 身体关节字段列表 */
 const BODY_JOINT_KEYS = [
@@ -54,6 +54,60 @@ function lerpBonePose(a: BonePose, b: BonePose, t: number): BonePose {
   return pose as BonePose;
 }
 
+/** 在两个 Vec3 间插值，任一为 undefined 时返回另一个或 undefined */
+function lerpVec(v1: Vec3 | undefined, v2: Vec3 | undefined, t: number): Vec3 | undefined {
+  if (!v1 && !v2) return undefined;
+  if (!v1) return v2;
+  if (!v2) return v1;
+  return { x: v1.x + (v2.x - v1.x) * t, y: v1.y + (v2.y - v1.y) * t, z: v1.z + (v2.z - v1.z) * t };
+}
+
+/**
+ * 在两个 VRMPose 间插值
+ * - ikTargets 各分量线性插值
+ * - expression/headMovement/handShapes 取 B 的（或 A 的 fallback）
+ * - bones 取并集，逐骨骼对 rotation/position 线性插值
+ */
+function lerpVRMPose(a: VRMPose, b: VRMPose, t: number): VRMPose {
+  const result: VRMPose = {
+    bones: {},
+    expression: b.expression ?? a.expression,
+    headMovement: b.headMovement ?? a.headMovement,
+    ikTargets: {},
+    handShapes: b.handShapes ?? a.handShapes,
+  };
+
+  // 插值 IK 目标
+  if (a.ikTargets || b.ikTargets) {
+    result.ikTargets = {
+      leftHand: lerpVec(a.ikTargets?.leftHand, b.ikTargets?.leftHand, t),
+      rightHand: lerpVec(a.ikTargets?.rightHand, b.ikTargets?.rightHand, t),
+      leftFoot: lerpVec(a.ikTargets?.leftFoot, b.ikTargets?.leftFoot, t),
+      rightFoot: lerpVec(a.ikTargets?.rightFoot, b.ikTargets?.rightFoot, t),
+    };
+  }
+
+  // 插值 bones（并集，逐分量）
+  const aBones = a.bones ?? {};
+  const bBones = b.bones ?? {};
+  const boneKeys = new Set([...Object.keys(aBones), ...Object.keys(bBones)]);
+  for (const key of boneKeys) {
+    const ta = aBones[key as keyof typeof aBones];
+    const tb = bBones[key as keyof typeof bBones];
+    if (ta && tb) {
+      result.bones[key as keyof typeof result.bones] = {
+        rotation: lerpVec3(ta.rotation, tb.rotation, t),
+        position: ta.position && tb.position
+          ? lerpVec3(ta.position, tb.position, t)
+          : (ta.position ?? tb.position),
+      };
+    } else {
+      result.bones[key as keyof typeof result.bones] = (ta ?? tb)!;
+    }
+  }
+  return result;
+}
+
 /**
  * 动作播放器
  * 由外部循环调用 update(deltaTime) 推进时间，并在帧间做缓动插值（easeInOutCubic）
@@ -73,6 +127,10 @@ export class MotionPlayer {
   private onComplete: (() => void) | null = null;
   /** 当前姿态（用于 getCurrentPose） */
   private currentPose: BonePose = NEUTRAL_POSE;
+  /** 当前播放的 SignMotion 关键帧序列（新轨道） */
+  private currentMotion: SignMotion | null = null;
+  /** SignMotion 起播时间戳（performance.now()） */
+  private motionStartTime: number = 0;
 
   /** 播放一个动作 */
   play(motion: MotionData, onComplete?: () => void): void {
@@ -177,5 +235,49 @@ export class MotionPlayer {
     const span = f1.timestamp - f0.timestamp;
     const t = span > 0 ? (time - f0.timestamp) / span : 0;
     return lerpBonePose(f0.pose, f1.pose, t);
+  }
+
+  /**
+   * 播放关键帧动作序列（SignMotion 新轨道）
+   * 不影响旧 MotionData 轨道，外部用 getPoseAt 采样
+   */
+  playMotion(motion: SignMotion): void {
+    this.currentMotion = motion;
+    this.motionStartTime = performance.now();
+  }
+
+  /**
+   * 获取指定时刻（毫秒）的插值 VRMPose
+   * - 无 motion 或关键帧为空 → NEUTRAL_VRM_POSE
+   * - timeMs >= duration → 最后一帧
+   * - 否则在所在关键帧区间用 easeInOutCubic 缓动插值
+   */
+  getPoseAt(timeMs: number): VRMPose {
+    if (!this.currentMotion || this.currentMotion.keyframes.length === 0) {
+      return NEUTRAL_VRM_POSE;
+    }
+    const kfs = this.currentMotion.keyframes;
+    const duration = this.currentMotion.duration_ms;
+
+    // 超出时长：返回最后一帧
+    if (timeMs >= duration) {
+      return kfs[kfs.length - 1].pose;
+    }
+
+    // 归一化时间
+    const t = duration > 0 ? timeMs / duration : 0;
+
+    // 找到 t 所在的关键帧区间 [i, i+1]
+    let i = 0;
+    while (i < kfs.length - 1 && kfs[i + 1].time < t) i++;
+
+    const kfA = kfs[i];
+    const kfB = kfs[Math.min(i + 1, kfs.length - 1)];
+    const span = kfB.time - kfA.time;
+    const localT = span > 0 ? (t - kfA.time) / span : 0;
+    // easeInOutCubic 缓动
+    const eased = localT < 0.5 ? 4 * localT ** 3 : 1 - Math.pow(-2 * localT + 2, 3) / 2;
+
+    return lerpVRMPose(kfA.pose, kfB.pose, eased);
   }
 }

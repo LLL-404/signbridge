@@ -224,3 +224,39 @@ describe('MotionPlayer', () => {
     expect(player.isPlaying()).toBe(false);
   });
 });
+
+import type { SignMotion, VRMPose } from '@/types/avatar';
+
+describe('MotionPlayer 关键帧模式', () => {
+  it('应在两个关键帧间插值出中间 VRMPose', () => {
+    const motion: SignMotion = {
+      gloss_id: 'test',
+      duration_ms: 1000,
+      loop: false,
+      keyframes: [
+        { time: 0, pose: { ikTargets: { rightHand: { x: 0, y: 1, z: 0 } } } as VRMPose },
+        { time: 1, pose: { ikTargets: { rightHand: { x: 1, y: 1, z: 0 } } } as VRMPose },
+      ],
+    };
+    const player = new MotionPlayer();
+    player.playMotion(motion);
+    const pose = player.getPoseAt(500);  // 中点
+    expect(pose.ikTargets?.rightHand?.x).toBeCloseTo(0.5);
+  });
+
+  it('超出时长应返回最后一帧', () => {
+    const motion: SignMotion = {
+      gloss_id: 'test',
+      duration_ms: 1000,
+      loop: false,
+      keyframes: [
+        { time: 0, pose: { ikTargets: { rightHand: { x: 0, y: 1, z: 0 } } } as VRMPose },
+        { time: 1, pose: { ikTargets: { rightHand: { x: 1, y: 1, z: 0 } } } as VRMPose },
+      ],
+    };
+    const player = new MotionPlayer();
+    player.playMotion(motion);
+    const pose = player.getPoseAt(2000);
+    expect(pose.ikTargets?.rightHand?.x).toBeCloseTo(1);
+  });
+});
