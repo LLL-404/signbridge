@@ -163,6 +163,9 @@ interface ModelScale {
 }
 const MODEL_SCALE = new WeakMap<VRM, ModelScale>();
 
+/** 缓存每个骨骼在 rest pose 下的世界方向（单位向量，指向子关节） */
+const REST_WORLD_DIR = new WeakMap<VRM, Map<string, THREE.Vector3>>();
+
 /** 读取骨骼世界位置 */
 function getBoneWorldPos(node: THREE.Object3D | null, out: THREE.Vector3): THREE.Vector3 {
   if (node) node.getWorldPosition(out);
@@ -189,17 +192,39 @@ function getModelScale(vrm: VRM): ModelScale {
   const hipsWorld = getBoneWorldPos(hipsNode, new THREE.Vector3());
   const leftWorld = getBoneWorldPos(leftShoulder, new THREE.Vector3());
   const rightWorld = getBoneWorldPos(rightShoulder, new THREE.Vector3());
-  // head 骨骼位置 + 估算头顶偏移（head 骨骼到头顶约 0.10m）
   const headWorld = getBoneWorldPos(headNode, new THREE.Vector3());
-  // 肩峰 Y = 左右肩 Y 的平均值
   const shoulderY = Math.abs(((leftWorld.y + rightWorld.y) / 2) - hipsWorld.y) || STANDARD_SHOULDER_Y;
-  // 肩宽半幅 = |右肩 X - 左肩 X| / 2
   const shoulderHalfWidth = Math.abs(rightWorld.x - leftWorld.x) / 2 || STANDARD_SHOULDER_HALF_WIDTH;
-  // 头顶 Y = head 骨骼 Y + 0.10（head 到头顶的估算距离）
   const headTopY = Math.abs(headWorld.y - hipsWorld.y) + 0.10 || STANDARD_HEAD_TOP_Y;
   const scale: ModelScale = { shoulderY, shoulderHalfWidth, headTopY };
   MODEL_SCALE.set(vrm, scale);
   return scale;
+}
+
+/**
+ * 读取骨骼在 rest pose 下的世界方向（从父关节指向子关节）
+ * VRM 模型加载后未施加任何旋转前，骨骼的"延伸方向"= 子节点世界位置 - 父节点世界位置
+ * 用于 IK 反算时正确匹配模型真实 rest pose（T-pose/A-pose 均可）
+ */
+function getRestWorldDir(vrm: VRM, boneName: string): THREE.Vector3 {
+  let cache = REST_WORLD_DIR.get(vrm);
+  if (!cache) {
+    cache = new Map();
+    REST_WORLD_DIR.set(vrm, cache);
+  }
+  const cached = cache.get(boneName);
+  if (cached) return cached;
+  const humanoid = vrm.humanoid;
+  const node = humanoid.getRawBoneNode(boneName as never);
+  // rest 方向 = 第一个子节点位置 - 自身位置（骨骼指向子关节）
+  let dir = new THREE.Vector3(0, -1, 0); // 兜底
+  if (node && node.children.length > 0) {
+    const childWorld = getBoneWorldPos(node.children[0], new THREE.Vector3());
+    const selfWorld = getBoneWorldPos(node, new THREE.Vector3());
+    dir = childWorld.sub(selfWorld).normalize();
+  }
+  cache.set(boneName, dir);
+  return dir;
 }
 
 /**
@@ -276,27 +301,113 @@ function applyVRMPose(
     }
   }
 
-  // ===== 2. IK 目标反算（基于模型真实几何 + 比例缩放）=====
+  // ===== 2. IK 目标反算（世界四元数 + 父逆，正确连接骨骼链）=====
   if (pose.ikTargets) {
-    // 读取真实 hips 世界位置，作为偏移的基准点
     const hipsWorld = getBoneWorldPos(hipsNode, new THREE.Vector3());
 
-    // 将"相对 hips 的偏移"转换为模型场景本地坐标：
-    //   1. Y 轴分区间缩放（肩及以下按肩高，肩以上按头高），X 轴按肩宽缩放
-    //   2. 本地偏移转到世界方向（含场景旋转，避免 +Z 前方被反转）
-    //   3. realWorld = hipsWorld + worldOffset（转到模型世界坐标）
-    //   4. targetLocal = scene.worldToLocal(realWorld)（消除场景变换，回到本地）
+    // 偏移 → 场景本地坐标（同前：分区间缩放 + 场景旋转补偿）
     const sceneQuat = scene.quaternion;
     const toSceneLocal = (offset: { x: number; y: number; z: number }): THREE.Vector3 => {
       const scaled = new THREE.Vector3(
         offset.x * xScale,
         scaleOffsetY(offset.y, scale),
-        offset.z, // Z 深度不缩放（绝对值，与身高无关）
+        offset.z,
       );
-      // 本地偏移（+Z 为模型前方）→ 世界方向（含 scene.rotation.y=PI 等变换）
       const worldOffset = scaled.applyQuaternion(sceneQuat);
       const realWorld = hipsWorld.clone().add(worldOffset);
       return scene.worldToLocal(realWorld);
+    };
+
+    /**
+     * 应用 2 段 IK 到骨骼链（世界四元数 + 父逆，关节正确连接）
+     *
+     * 原理：
+     *   - solveArm/solveLeg 返回每段骨骼的"世界旋转增量"（把 rest 方向转到目标方向）
+     *   - 但 node.rotation 是本地欧拉角（相对父节点）
+     *   - 正确转换：本地四元数 = 父世界四元数⁻¹ × 目标世界四元数
+     *   - 目标世界四元数 = rest世界四元数 × IK增量四元数
+     *
+     * 这样无论父骨骼（chest/hips）如何旋转，子骨骼都能正确接力，关节不断裂。
+     *
+     * @param vrm VRM 模型
+     * @param upperBoneName 上段骨骼名（如 rightUpperArm）
+     * @param lowerBoneName 下段骨骼名（如 rightLowerArm）
+     * @param ikRots IK 返回的旋转（上段、下段，欧拉角）
+     * @param smootherKey smoother 缓存键前缀
+     * @param smoother BoneSmoother 实例
+     * @param timestamp 时间戳
+     */
+    const applyLimbIK = (
+      vrm: VRM,
+      upperBoneName: string,
+      lowerBoneName: string,
+      ikRots: { upper: { x: number; y: number; z: number }; lower: { x: number; y: number; z: number } },
+      smootherKeyPrefix: string,
+      smoother: BoneSmoother,
+      timestamp: number,
+    ): void => {
+      const humanoid = vrm.humanoid;
+      const upperNode = humanoid.getRawBoneNode(upperBoneName as never);
+      const lowerNode = humanoid.getRawBoneNode(lowerBoneName as never);
+      if (!upperNode || !lowerNode) return;
+
+      // 1. 读 rest 世界方向（模型真实 T-pose/A-pose，首次缓存）
+      const upperRestDir = getRestWorldDir(vrm, upperBoneName);
+      const lowerRestDir = getRestWorldDir(vrm, lowerBoneName);
+
+      // 2. IK 增量四元数（从欧拉角恢复）
+      const upperDeltaQuat = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(ikRots.upper.x, ikRots.upper.y, ikRots.upper.z, 'XYZ'),
+      );
+      const lowerDeltaQuat = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(ikRots.lower.x, ikRots.lower.y, ikRots.lower.z, 'XYZ'),
+      );
+
+      // 3. rest 世界四元数（把 -Y 转到 rest 方向，与 solve 的 BONE_REST_DIR=(0,-1,0) 对齐）
+      const upperRestQuat = new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(0, -1, 0), upperRestDir,
+      );
+      const lowerRestQuat = new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(0, -1, 0), lowerRestDir,
+      );
+
+      // 4. 目标世界四元数 = rest 世界四元数 × IK 增量
+      //    （IK 增量是"在 rest 基础上的旋转"，所以右乘）
+      const upperTargetWorldQuat = upperRestQuat.clone().multiply(upperDeltaQuat);
+      const lowerTargetWorldQuat = lowerRestQuat.clone().multiply(lowerDeltaQuat);
+
+      // 5. 父节点世界四元数
+      const upperParentWorldQuat = new THREE.Quaternion();
+      if (upperNode.parent) {
+        upperNode.parent.getWorldQuaternion(upperParentWorldQuat);
+      }
+
+      // 6. 上段本地四元数 = 父世界⁻¹ × 目标世界
+      const upperLocalQuat = upperParentWorldQuat.clone().invert().multiply(upperTargetWorldQuat);
+      // 平滑后写入（四元数平滑：转欧拉角用 smoother，再转回四元数写 node.quaternion）
+      const upperEuler = new THREE.Euler().setFromQuaternion(upperLocalQuat, 'XYZ');
+      const upperSmoothed = smoother.smooth(
+        `${smootherKeyPrefix}_${upperBoneName}`,
+        { x: upperEuler.x, y: upperEuler.y, z: upperEuler.z },
+        timestamp,
+      );
+      upperNode.quaternion.setFromEuler(
+        new THREE.Euler(upperSmoothed.x, upperSmoothed.y, upperSmoothed.z, 'XYZ'),
+      );
+
+      // 7. 下段：父节点是上段，需要用上段"当前已写入"的世界四元数
+      //    （上段刚写入 quaternion，但 matrixWorld 可能未更新，手动算：父世界 × 上段本地）
+      const lowerParentWorldQuat = upperParentWorldQuat.clone().multiply(upperLocalQuat);
+      const lowerLocalQuat = lowerParentWorldQuat.clone().invert().multiply(lowerTargetWorldQuat);
+      const lowerEuler = new THREE.Euler().setFromQuaternion(lowerLocalQuat, 'XYZ');
+      const lowerSmoothed = smoother.smooth(
+        `${smootherKeyPrefix}_${lowerBoneName}`,
+        { x: lowerEuler.x, y: lowerEuler.y, z: lowerEuler.z },
+        timestamp,
+      );
+      lowerNode.quaternion.setFromEuler(
+        new THREE.Euler(lowerSmoothed.x, lowerSmoothed.y, lowerSmoothed.z, 'XYZ'),
+      );
     };
 
     // 右手 IK
@@ -304,11 +415,9 @@ function applyVRMPose(
       const upperArmNode = humanoid.getRawBoneNode('rightUpperArm' as never);
       const lowerArmNode = humanoid.getRawBoneNode('rightLowerArm' as never);
       const handNode = humanoid.getRawBoneNode('rightHand' as never);
-      // 上臂根部世界位置 → 场景本地
       const shoulderWorld = getBoneWorldPos(upperArmNode, new THREE.Vector3());
       const shoulderLocal = scene.worldToLocal(shoulderWorld.clone());
       const targetLocal = toSceneLocal(pose.ikTargets.rightHand);
-      // 骨骼长度：子骨骼相对父骨骼的平移距离
       const upperArmLen = getBoneLength(lowerArmNode, 0.28);
       const forearmLen = getBoneLength(handNode, 0.26);
       const ik = solveArm(
@@ -316,16 +425,9 @@ function applyVRMPose(
         { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
         upperArmLen, forearmLen, 'right',
       );
-      if (upperArmNode) {
-        const r = retargetRotation('rightUpperArm', ik.shoulderRotation);
-        const s = smoother.smooth('rightUpperArm', r, timestamp);
-        upperArmNode.rotation.set(s.x, s.y, s.z);
-      }
-      if (lowerArmNode) {
-        const r = retargetRotation('rightLowerArm', ik.elbowRotation);
-        const s = smoother.smooth('rightLowerArm', r, timestamp);
-        lowerArmNode.rotation.set(s.x, s.y, s.z);
-      }
+      applyLimbIK(vrm, 'rightUpperArm', 'rightLowerArm',
+        { upper: ik.shoulderRotation, lower: ik.elbowRotation },
+        'vrm', smoother, timestamp);
     }
     // 左手 IK
     if (pose.ikTargets.leftHand) {
@@ -342,16 +444,9 @@ function applyVRMPose(
         { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
         upperArmLen, forearmLen, 'left',
       );
-      if (upperArmNode) {
-        const r = retargetRotation('leftUpperArm', ik.shoulderRotation);
-        const s = smoother.smooth('leftUpperArm', r, timestamp);
-        upperArmNode.rotation.set(s.x, s.y, s.z);
-      }
-      if (lowerArmNode) {
-        const r = retargetRotation('leftLowerArm', ik.elbowRotation);
-        const s = smoother.smooth('leftLowerArm', r, timestamp);
-        lowerArmNode.rotation.set(s.x, s.y, s.z);
-      }
+      applyLimbIK(vrm, 'leftUpperArm', 'leftLowerArm',
+        { upper: ik.shoulderRotation, lower: ik.elbowRotation },
+        'vrm', smoother, timestamp);
     }
     // 右脚 IK
     if (pose.ikTargets.rightFoot) {
@@ -368,16 +463,9 @@ function applyVRMPose(
         { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
         thighLen, shinLen,
       );
-      if (upperLegNode) {
-        const r = retargetRotation('rightUpperLeg', ik.hipRotation);
-        const s = smoother.smooth('rightUpperLeg', r, timestamp);
-        upperLegNode.rotation.set(s.x, s.y, s.z);
-      }
-      if (lowerLegNode) {
-        const r = retargetRotation('rightLowerLeg', ik.kneeRotation);
-        const s = smoother.smooth('rightLowerLeg', r, timestamp);
-        lowerLegNode.rotation.set(s.x, s.y, s.z);
-      }
+      applyLimbIK(vrm, 'rightUpperLeg', 'rightLowerLeg',
+        { upper: ik.hipRotation, lower: ik.kneeRotation },
+        'vrm', smoother, timestamp);
     }
     // 左脚 IK
     if (pose.ikTargets.leftFoot) {
@@ -394,16 +482,9 @@ function applyVRMPose(
         { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
         thighLen, shinLen,
       );
-      if (upperLegNode) {
-        const r = retargetRotation('leftUpperLeg', ik.hipRotation);
-        const s = smoother.smooth('leftUpperLeg', r, timestamp);
-        upperLegNode.rotation.set(s.x, s.y, s.z);
-      }
-      if (lowerLegNode) {
-        const r = retargetRotation('leftLowerLeg', ik.kneeRotation);
-        const s = smoother.smooth('leftLowerLeg', r, timestamp);
-        lowerLegNode.rotation.set(s.x, s.y, s.z);
-      }
+      applyLimbIK(vrm, 'leftUpperLeg', 'leftLowerLeg',
+        { upper: ik.hipRotation, lower: ik.kneeRotation },
+        'vrm', smoother, timestamp);
     }
   }
 
