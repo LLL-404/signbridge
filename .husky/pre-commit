@@ -1,0 +1,31 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+CHANGELOG="CHANGELOG.md"
+
+if [ ! -f "$CHANGELOG" ]; then
+    echo "ERROR: CHANGELOG.md 不存在，请先创建变更日志文件"
+    exit 1
+fi
+
+if git diff --cached --name-only | grep -q "CHANGELOG"; then
+    exit 0
+fi
+
+UNRELEASED=$(sed -n '/^\[Unreleased\]/,/^## \[/p' "$CHANGELOG")
+
+if echo "$UNRELEASED" | grep -qE '^\s+- ' && ! echo "$UNRELEASED" | grep -qE '^\s+- 暂无'; then
+    exit 0
+fi
+
+echo ""
+echo "ERROR: 提交被阻止 - CHANGELOG.md 未更新"
+echo ""
+echo "请在提交前更新 CHANGELOG.md："
+echo "1. 在 [Unreleased] 部分添加本次变更的记录"
+echo "2. 将 CHANGELOG.md 添加到暂存区 (git add CHANGELOG.md)"
+echo ""
+echo "跳过检查（不推荐）: git commit --no-verify"
+echo ""
+
+exit 1

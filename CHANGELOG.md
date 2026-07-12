@@ -9,7 +9,7 @@
 ## [Unreleased]
 
 ### ✨ 新增
-- feat: 添加 pre-commit 钩子强制更新变更日志
+- feat: 配置 husky pre-commit 钩子，强制提交前更新 CHANGELOG
 
 ### 🔧 修复
 - 暂无
