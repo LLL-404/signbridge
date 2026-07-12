@@ -29,11 +29,12 @@
 
 核心模块：
   - kernel/         微内核（插件管理 + 事件总线）
-  - modules/avatar  虚拟人驱动（动作合成 + IK + 过渡引擎）
-  - modules/recognition  手语识别（Worker + 规则 + LSTM + 连续识别）
+  - plugins/        内置插件注册中心
+  - modules/avatar  虚拟人驱动（动作合成 + IK + 过渡引擎 + VRM 适配）
+  - modules/recognition  手语识别（Worker + 规则 + LSTM + 连续识别 + 组合识别）
   - modules/grammar 语法引擎（FMM分词 + 重写 + 词汇映射）
   - modules/learning 跟练评分（DTW + 三维度评分）
-  - modules/data    数据层（IndexedDB + 词汇/动作存储）
+  - modules/data    数据层（IndexedDB + 词汇/动作存储 + 数据采集）
 
 AI能力：
   - Web Speech API (浏览器原生语音识别)
@@ -47,26 +48,44 @@ AI能力：
 ## 项目结构
 
 ```
-workspace/
+signbridge/
 ├── frontend/                 # 前端应用（纯前端，无后端依赖）
 │   ├── src/
 │   │   ├── kernel/           # 微内核（插件管理 + 事件总线）
 │   │   ├── plugins/          # 内置插件注册中心
 │   │   ├── modules/          # 核心业务模块
-│   │   │   ├── avatar/       # 虚拟人驱动
-│   │   │   ├── recognition/  # 手语识别
-│   │   │   ├── grammar/      # 语法引擎
-│   │   │   ├── learning/     # 跟练评分
-│   │   │   └── data/         # 数据持久化
-│   │   ├── components/       # UI 组件
+│   │   │   ├── avatar/       # 虚拟人驱动（动作合成 + IK + 过渡引擎 + VRM 适配）
+│   │   │   ├── recognition/  # 手语识别（Worker + 规则 + LSTM + 连续识别 + 组合识别）
+│   │   │   ├── grammar/      # 语法引擎（FMM分词 + 重写 + 词汇映射）
+│   │   │   ├── learning/     # 跟练评分（DTW + 三维度评分）
+│   │   │   └── data/         # 数据层（IndexedDB + 词汇/动作存储 + 数据采集）
+│   │   ├── components/       # UI 组件（layout/avatar/sign/voice/learning/common/debug）
 │   │   ├── pages/            # 页面
+│   │   ├── hooks/            # React Hooks
 │   │   ├── stores/           # Zustand 状态
 │   │   ├── types/            # TypeScript 类型
-│   │   └── config.ts         # 环境配置
-│   ├── public/               # 静态资源（手势库/词汇库）
+│   │   ├── data/             # 演示场景数据
+│   │   ├── styles/           # 全局样式
+│   │   ├── App.tsx           # 应用根组件
+│   │   ├── config.ts         # 环境配置
+│   │   ├── main.tsx          # 应用入口
+│   │   └── routes.tsx        # 路由配置（动态从插件管理器读取）
+│   ├── public/               # 静态资源（手势库/词汇库/VRM 模型）
+│   ├── scripts/              # 开发工具脚本
+│   ├── e2e/                  # E2E 测试
 │   └── package.json
+├── docs/                     # 项目文档
+│   ├── CODE_WIKI.md          # 代码知识库
+│   ├── DEMO_SCRIPT.md        # 演示脚本
+│   ├── DEPLOY_GUIDE.md       # 部署指南
+│   ├── PRESENTATION_OUTLINE.md # 演讲大纲
+│   └── superpowers/          # 设计与规划文档
+├── .github/workflows/        # CI/CD 配置
+├── README.md                 # 项目说明
 ├── index.html                # 创意提案展示页
-└── README.md
+├── start.bat                 # Windows 启动脚本
+├── start.ps1                 # PowerShell 启动脚本
+└── byteplus-pages.yaml       # BytePlus Pages 部署配置
 ```
 
 ## 差异化竞争力
@@ -106,6 +125,11 @@ workspace/
 ## 项目文件
 
 - `frontend/` — 完整前端应用（React + TypeScript + Vite）
+- `docs/CODE_WIKI.md` — 代码知识库
+- `docs/DEMO_SCRIPT.md` — 演示脚本
+- `docs/DEPLOY_GUIDE.md` — 部署指南
+- `docs/PRESENTATION_OUTLINE.md` — 演讲大纲
+- `CHANGELOG.md` — 变更日志（记录所有版本变更）
 - `index.html` — 创意提案展示页面
 - `README.md` — 项目说明文档
 
