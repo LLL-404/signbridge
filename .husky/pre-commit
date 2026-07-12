@@ -1,6 +1,3 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
 CHANGELOG="CHANGELOG.md"
 
 if [ ! -f "$CHANGELOG" ]; then
@@ -8,13 +5,9 @@ if [ ! -f "$CHANGELOG" ]; then
     exit 1
 fi
 
-if git diff --cached --name-only | grep -q "CHANGELOG"; then
-    exit 0
-fi
+UNRELEASED=$(sed -n '/\[Unreleased\]/,/## \[/p' "$CHANGELOG")
 
-UNRELEASED=$(sed -n '/^\[Unreleased\]/,/^## \[/p' "$CHANGELOG")
-
-if echo "$UNRELEASED" | grep -qE '^\s+- ' && ! echo "$UNRELEASED" | grep -qE '^\s+- 暂无'; then
+if echo "$UNRELEASED" | grep -qE '(feat|fix|perf|chore|ci):'; then
     exit 0
 fi
 
