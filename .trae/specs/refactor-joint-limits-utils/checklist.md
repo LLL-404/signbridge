@@ -1,0 +1,9 @@
+- [x] JointLimits.ts 文件已创建，包含 clampRotationAngle、computeHingeAxis、constrainHingeJoint 三个函数
+- [x] clampRotationAngle 实现 w < 0 时翻转旋转轴的逻辑
+- [x] constrainHingeJoint 实现旋转轴投影到铰链轴 + 钳制 + 重建的逻辑
+- [x] computeHingeAxis 返回 boneRestDir × referenceDir 的归一化结果
+- [x] ClipBuilder.ts 中肩关节约束替换为 clampRotationAngle 调用
+- [x] ClipBuilder.ts 中肘关节约束替换为 computeHingeAxis + constrainHingeJoint 调用
+- [x] 内联约束代码已移除，保留说明性注释
+- [x] VS Code 诊断无新增 error/warning
+- [x] 工具函数行为与原内联实现完全一致

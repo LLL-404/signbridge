@@ -6,6 +6,9 @@ import type { SignGloss } from '@/types/sign';
 import { idbAdapter, STORES } from './IndexedDBAdapter';
 import { vocabularyStore } from './VocabularyStore';
 import { appConfig } from '@/config';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('DataInitializer');
 
 const VOCABULARY_JSON_URL = appConfig.vocabularyUrl;
 
@@ -33,6 +36,14 @@ export async function initializeVocabulary(): Promise<void> {
   return initPromise;
 }
 
+/**
+ * 获取词汇初始化 Promise（用于外部 await）
+ * 若初始化尚未启动，返回已 resolve 的 Promise
+ */
+export function getVocabularyReadyPromise(): Promise<void> {
+  return initPromise ?? Promise.resolve();
+}
+
 async function doInitialize(): Promise<void> {
   try {
     await idbAdapter.init();
@@ -45,18 +56,18 @@ async function doInitialize(): Promise<void> {
 
     const response = await fetch(VOCABULARY_JSON_URL);
     if (!response.ok) {
-      console.warn(`加载词汇数据失败：HTTP ${response.status}，使用内置常用词汇`);
+      log.warn(`加载词汇数据失败：HTTP ${response.status}，使用内置常用词汇`);
       return;
     }
 
     const data = (await response.json()) as VocabularyFile;
     if (!data.vocabulary || data.vocabulary.length === 0) {
-      console.warn('词汇数据为空，使用内置常用词汇');
+      log.warn('词汇数据为空，使用内置常用词汇');
       return;
     }
 
     await vocabularyStore.bulkImport(data.vocabulary);
   } catch (err) {
-    console.warn('词汇数据初始化失败，使用内置常用词汇:', err);
+    log.warn('词汇数据初始化失败，使用内置常用词汇', err);
   }
 }

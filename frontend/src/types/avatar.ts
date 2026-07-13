@@ -172,13 +172,6 @@ export interface VRMPose {
   bones: Partial<Record<VRMBoneName, BoneTransform>>;
   expression?: FacialExpression;
   headMovement?: HeadMovement;
-  /** IK 目标（可选，指定后覆盖 FK 结果） */
-  ikTargets?: {
-    leftHand?: Vec3;
-    rightHand?: Vec3;
-    leftFoot?: Vec3;
-    rightFoot?: Vec3;
-  };
   /** 手形（驱动手指骨骼） */
   handShapes?: { left?: HandShape; right?: HandShape };
 }
@@ -200,7 +193,7 @@ export interface SignMotion {
 /**
  * VRM 中性姿态（T-pose 零旋转，hips 无位移）
  * 注意：hips.position 是"相对模型原始 hips 位置的偏移"，{0,0,0} 表示不位移。
- * 其他骨骼的 rotation 均为零（rest pose）。ikTargets/handShapes 缺省为空。
+ * 其他骨骼的 rotation 均为零（rest pose）。handShapes 缺省为空。
  */
 export const NEUTRAL_VRM_POSE: VRMPose = {
   bones: {

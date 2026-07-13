@@ -1,0 +1,6 @@
+- [x] LOCATION_OFFSETS 中 13 个位置的 Z 值已按 spec 表格更新
+- [x] solveArmQuaternions 中 reference 向量 Z 分量从 0.3 改为 0.6
+- [x] VS Code 诊断无新增 error/warning
+- [x] getLocationOffset 函数逻辑未受影响（NEUTRAL 分支仍按 dominant 调整 x）
+- [x] offsetToSceneLocalTarget 坐标转换逻辑未受影响（X 取反、Z 不取反）
+- [x] 代码注释已更新说明 Z 值增大的原因

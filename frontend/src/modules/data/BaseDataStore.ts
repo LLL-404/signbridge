@@ -2,6 +2,9 @@
 // 子类通过继承获得统一的缓存机制，只需关注业务逻辑
 
 import { idbAdapter } from './IndexedDBAdapter';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('DataStore');
 
 /** 缓存配置：控制缓存容量与过期策略 */
 export interface CacheConfig {
@@ -47,7 +50,7 @@ export abstract class BaseDataStore<T> {
       }
       return result;
     } catch (error) {
-      console.error(`[${this.storeName}] 按主键获取失败 (id=${id}):`, error);
+      log.error(`[${this.storeName}] 按主键获取失败 (id=${id})`, error);
       throw error;
     }
   }
@@ -66,7 +69,7 @@ export abstract class BaseDataStore<T> {
       });
       return all;
     } catch (error) {
-      console.error(`[${this.storeName}] 获取全部数据失败:`, error);
+      log.error(`[${this.storeName}] 获取全部数据失败`, error);
       throw error;
     }
   }
@@ -82,7 +85,7 @@ export abstract class BaseDataStore<T> {
         this.setToCache(id, item);
       });
     } catch (error) {
-      console.error(`[${this.storeName}] 批量导入失败:`, error);
+      log.error(`[${this.storeName}] 批量导入失败`, error);
       throw error;
     }
   }

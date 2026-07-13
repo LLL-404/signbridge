@@ -1,6 +1,11 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import type { VRM } from '@pixiv/three-vrm';
 import type { BonePose, VRMPose } from '@/types/avatar';
+import type { VRMAnimator } from '@/modules/avatar/VRMAnimator';
 import { useAvatarStore } from '@/stores/avatarStore';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('AvatarCanvas');
 
 const Avatar3D = lazy(() => import('./Avatar3D'));
 const Avatar2D = lazy(() => import('./Avatar2D'));
@@ -26,6 +31,8 @@ export interface AvatarCanvasProps {
   height?: SizeProp;
   className?: string;
   style?: CSSProperties;
+  /** VRM 模型加载完成回调，同时传递 VRM 和 VRMAnimator 实例 */
+  onVRMLoaded?: (vrm: VRM, animator: VRMAnimator) => void;
 }
 
 interface AvatarErrorBoundaryProps {
@@ -51,7 +58,7 @@ class AvatarErrorBoundary extends Component<AvatarErrorBoundaryProps, AvatarErro
   }
 
   componentDidCatch(error: Error): void {
-    console.warn('Avatar3D 渲染失败，降级到 2D 模式:', error.message);
+    log.warn('Avatar3D 渲染失败，降级到 2D 模式', error.message);
     this.props.onFallback?.();
   }
 
@@ -109,6 +116,7 @@ export default function AvatarCanvas({
   height = '100%',
   className,
   style,
+  onVRMLoaded,
 }: AvatarCanvasProps) {
   const mode = useAvatarStore((s) => s.mode);
   const setMode = useAvatarStore((s) => s.setMode);
@@ -150,6 +158,7 @@ export default function AvatarCanvas({
               height="100%"
               containerStyle={{ width: '100%', height: '100%' }}
               className="!w-full !h-full"
+              onVRMLoaded={onVRMLoaded}
             />
           </AvatarErrorBoundary>
         ) : (

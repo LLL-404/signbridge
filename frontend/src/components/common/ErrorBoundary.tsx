@@ -15,6 +15,9 @@
  */
 
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('ErrorBoundary');
 
 interface ErrorBoundaryProps {
   /** 子树 */
@@ -38,7 +41,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     // 控制台输出完整错误信息（含组件栈）
-    console.error('[ErrorBoundary] 捕获到未处理错误:', error, info);
+    log.error('捕获到未处理错误', error, info);
     this.props.onError?.(error, info);
   }
 

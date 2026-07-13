@@ -19,6 +19,9 @@ import type { Recognizer, FrameInput } from './Recognizer';
 import type { GestureDefinition } from './WorkerUtils';
 import { loadGestureLibrary } from './WorkerUtils';
 import { RuleRecognizer } from './RuleRecognizer';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('WorkerRecognizer');
 
 /** Worker 消息类型 */
 type WorkerMessage =
@@ -69,7 +72,7 @@ export class WorkerRecognizer implements Recognizer {
       this.lastHealthyTime = Date.now();
       this.startHeartbeat();
     } catch (err) {
-      console.warn('[WorkerRecognizer] Worker 启动失败，直接降级:', err);
+      log.warn('Worker 启动失败，直接降级', err);
       await this.activateFallback();
       this.isInitialized = true;
     }
@@ -94,7 +97,7 @@ export class WorkerRecognizer implements Recognizer {
       } else if (msg.type === 'pong') {
         this.lastHeartbeatPong = Date.now();
       } else if (msg.type === 'error') {
-        console.error('[WorkerRecognizer] Worker 错误:', msg.message);
+        log.error('Worker 错误', msg.message);
         this.clearPendingTimer();
         this.pendingResolve?.(null);
         this.pendingResolve = null;
@@ -102,7 +105,7 @@ export class WorkerRecognizer implements Recognizer {
     };
 
     this.worker.onerror = (err) => {
-      console.error('[WorkerRecognizer] Worker 异常:', err.message);
+      log.error('Worker 异常', err.message);
       this.hasCrashed = true;
       this.clearPendingTimer();
       this.pendingResolve?.(null);
@@ -144,8 +147,8 @@ export class WorkerRecognizer implements Recognizer {
     try {
       if (this.restartCount < MAX_WORKER_RESTARTS) {
         this.restartCount++;
-        console.log(
-          `[WorkerRecognizer] 尝试重启 Worker (${this.restartCount}/${MAX_WORKER_RESTARTS})...`,
+        log.debug(
+          `尝试重启 Worker (${this.restartCount}/${MAX_WORKER_RESTARTS})...`,
         );
         this.worker?.terminate();
         this.worker = null;
@@ -153,13 +156,13 @@ export class WorkerRecognizer implements Recognizer {
         await this.startWorker();
         this.lastHealthyTime = Date.now();
         this.startHeartbeat(); // 重启后必须重新启动心跳
-        console.log('[WorkerRecognizer] Worker 重启成功');
+        log.debug('Worker 重启成功');
       } else {
-        console.error('[WorkerRecognizer] 达到最大重启次数，永久降级到主线程');
+        log.error('达到最大重启次数，永久降级到主线程');
         await this.activateFallback();
       }
     } catch (err) {
-      console.error('[WorkerRecognizer] 重启失败:', err);
+      log.error('重启失败', err);
       await this.activateFallback();
     } finally {
       this.isRestarting = false;
@@ -169,7 +172,7 @@ export class WorkerRecognizer implements Recognizer {
   /** 激活降级识别器 */
   private async activateFallback(): Promise<void> {
     if (this.isDegradedMode) return;
-    console.warn('[WorkerRecognizer] 降级到主线程 RuleRecognizer');
+    log.warn('降级到主线程 RuleRecognizer');
     this.isDegradedMode = true;
     this.ready = false;
     this.stopHeartbeat();
@@ -195,13 +198,13 @@ export class WorkerRecognizer implements Recognizer {
         this.restartCount > 0 &&
         Date.now() - this.lastHealthyTime > RESTART_COUNT_RESET_MS
       ) {
-        console.log('[WorkerRecognizer] 健康运行已超阈值，重置重启计数');
+        log.debug('健康运行已超阈值，重置重启计数');
         this.restartCount = 0;
       }
 
       // 检查心跳超时
       if (Date.now() - this.lastHeartbeatPong > HEARTBEAT_TIMEOUT_MS + HEARTBEAT_INTERVAL_MS) {
-        console.warn('[WorkerRecognizer] 心跳超时，Worker 可能卡死');
+        log.warn('心跳超时，Worker 可能卡死');
         this.handleWorkerCrash();
         return;
       }
@@ -257,7 +260,7 @@ export class WorkerRecognizer implements Recognizer {
     try {
       bitmap = await createImageBitmap(video);
     } catch (err) {
-      console.error('[WorkerRecognizer] 创建 ImageBitmap 失败:', err);
+      log.error('创建 ImageBitmap 失败', err);
       return null;
     }
     const timestamp = input.timestamp ?? performance.now();
@@ -265,8 +268,8 @@ export class WorkerRecognizer implements Recognizer {
     return new Promise((resolve) => {
       // 设置超时：超时后用 fallback 兜底当前帧 + 异步触发 Worker 重启
       this.pendingTimer = setTimeout(() => {
-        console.warn(
-          `[WorkerRecognizer] 识别超时 (>${RECOGNIZE_TIMEOUT_MS}ms)，降级当前帧并重启 Worker`,
+        log.warn(
+          `识别超时 (>${RECOGNIZE_TIMEOUT_MS}ms)，降级当前帧并重启 Worker`,
         );
         this.pendingResolve = null;
         // 当前帧用 fallback 兜底（不丢帧）
@@ -285,7 +288,7 @@ export class WorkerRecognizer implements Recognizer {
           [bitmap], // 转移所有权
         );
       } catch (err) {
-        console.error('[WorkerRecognizer] postMessage 失败:', err);
+        log.error('postMessage 失败', err);
         this.clearPendingTimer();
         this.pendingResolve = null;
         // Worker 可能已死，触发崩溃处理；当前帧返回 null

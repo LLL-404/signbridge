@@ -71,6 +71,7 @@ function makeSequence(glossIds: string[]): GlossSequence {
   return {
     items: glossIds.map((gloss_id) => ({ gloss_id, chinese: gloss_id })),
     sentence_non_manual: undefined,
+    unmatched_words: [],
   };
 }
 

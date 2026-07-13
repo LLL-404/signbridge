@@ -53,6 +53,8 @@ export interface GlossSequenceItem {
 export interface GlossSequence {
   items: GlossSequenceItem[];
   sentence_non_manual?: NonManualMark;
+  /** 未匹配到手语词汇的中文词 */
+  unmatched_words: string[];
 }
 
 /** 非手动规则触发条件 */

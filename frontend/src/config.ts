@@ -51,8 +51,8 @@ export const appConfig = {
   /** 默认手势库 JSON 路径 */
   gestureLibraryUrl: env('VITE_GESTURE_LIBRARY_URL', '/gestures.json'),
 
-  /** 词汇库 JSON 路径 */
-  vocabularyUrl: env('VITE_VOCABULARY_URL', '/data/vocabulary.json'),
+  /** 词汇库 JSON 路径（基于 Vite BASE_URL 拼接，兼容子路径部署） */
+  vocabularyUrl: env('VITE_VOCABULARY_URL', import.meta.env.BASE_URL + 'data/vocabulary.json'),
 } as const;
 
 export type AppConfig = typeof appConfig;

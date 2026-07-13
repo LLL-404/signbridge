@@ -20,6 +20,9 @@
 import type { ComponentType } from 'react';
 import { pluginManager } from '@/kernel';
 import type { Plugin, PluginFactory } from '@/kernel';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('Plugins');
 
 /**
  * 将 named export 包装为 React.lazy 兼容的 { default } 形式
@@ -150,7 +153,7 @@ export async function activateDefaultPlugins(): Promise<void> {
       await pluginManager.activate(name);
     } catch (err) {
       // 单个插件激活失败不应阻塞其他插件
-      console.error(`[plugins] 激活插件 "${name}" 失败:`, err);
+      log.error(`激活插件 "${name}" 失败`, err);
     }
   }
 }

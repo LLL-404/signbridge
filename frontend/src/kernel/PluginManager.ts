@@ -16,9 +16,12 @@ import type {
   EventHandler,
 } from './types';
 import { eventBus } from './EventBus';
+import { logger } from '@/modules/debug/logger';
 
 /** 内核版本 */
 const KERNEL_VERSION = '1.0.0';
+
+const log = logger.module('PluginManager');
 
 class PluginManager {
   /** 已注册的插件工厂（未实例化） */
@@ -65,7 +68,7 @@ class PluginManager {
   /** 注册插件工厂（不实例化） */
   register(name: string, factory: PluginFactory): void {
     if (this.factories.has(name)) {
-      console.warn(`[PluginManager] 插件 "${name}" 已注册，跳过`);
+      log.warn(`插件 "${name}" 已注册，跳过`);
       return;
     }
     this.factories.set(name, factory);
@@ -124,7 +127,7 @@ class PluginManager {
       this.activePlugins.add(name);
       eventBus.emit('plugin:activated', { name });
     } catch (err) {
-      console.error(`[PluginManager] 激活插件 "${name}" 失败:`, err);
+      log.error(`激活插件 "${name}" 失败`, err);
       throw err;
     } finally {
       this.activating.delete(name);
@@ -142,7 +145,7 @@ class PluginManager {
       if (this.activePlugins.has(otherName)) {
         const deps = other.manifest.dependencies ?? [];
         if (deps.includes(name)) {
-          console.warn(`[PluginManager] 无法停用 "${name}"，被 "${otherName}" 依赖`);
+          log.warn(`无法停用 "${name}"，被 "${otherName}" 依赖`);
           return;
         }
       }

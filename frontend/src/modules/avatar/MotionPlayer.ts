@@ -54,17 +54,8 @@ function lerpBonePose(a: BonePose, b: BonePose, t: number): BonePose {
   return pose as BonePose;
 }
 
-/** 在两个 Vec3 间插值，任一为 undefined 时返回另一个或 undefined */
-function lerpVec(v1: Vec3 | undefined, v2: Vec3 | undefined, t: number): Vec3 | undefined {
-  if (!v1 && !v2) return undefined;
-  if (!v1) return v2;
-  if (!v2) return v1;
-  return { x: v1.x + (v2.x - v1.x) * t, y: v1.y + (v2.y - v1.y) * t, z: v1.z + (v2.z - v1.z) * t };
-}
-
 /**
  * 在两个 VRMPose 间插值
- * - ikTargets 各分量线性插值
  * - expression/headMovement/handShapes 取 B 的（或 A 的 fallback）
  * - bones 取并集，逐骨骼对 rotation/position 线性插值
  */
@@ -73,19 +64,8 @@ function lerpVRMPose(a: VRMPose, b: VRMPose, t: number): VRMPose {
     bones: {},
     expression: b.expression ?? a.expression,
     headMovement: b.headMovement ?? a.headMovement,
-    ikTargets: {},
     handShapes: b.handShapes ?? a.handShapes,
   };
-
-  // 插值 IK 目标
-  if (a.ikTargets || b.ikTargets) {
-    result.ikTargets = {
-      leftHand: lerpVec(a.ikTargets?.leftHand, b.ikTargets?.leftHand, t),
-      rightHand: lerpVec(a.ikTargets?.rightHand, b.ikTargets?.rightHand, t),
-      leftFoot: lerpVec(a.ikTargets?.leftFoot, b.ikTargets?.leftFoot, t),
-      rightFoot: lerpVec(a.ikTargets?.rightFoot, b.ikTargets?.rightFoot, t),
-    };
-  }
 
   // 插值 bones（并集，逐分量）
   const aBones = a.bones ?? {};

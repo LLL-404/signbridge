@@ -1,0 +1,6 @@
+- [x] solveArmQuaternions 中新增肘关节铰链约束（铰链轴计算 + 投影 + 钳制 + 重建）
+- [x] solveArmQuaternions 中新增肩关节角度约束（角度提取 + 钳制到 170° + 重建）
+- [x] 约束在返回前依次应用（先肩后肘）
+- [x] 铰链轴计算正确：右臂 hingeAxis ≈ (0,0,-1)，左臂 ≈ (0,0,1)
+- [x] 弯曲方向符号正确：两臂统一 clamp(0, 150°)（修正了 spec 中"左臂 clamp(-150°, 0)"的错误假设）
+- [x] VS Code 诊断无新增 error/warning

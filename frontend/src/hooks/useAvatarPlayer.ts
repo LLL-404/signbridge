@@ -81,6 +81,7 @@ export function useAvatarPlayer(): UseAvatarPlayerReturn {
   const playGloss = useCallback(async (glossId: string, onComplete?: () => void): Promise<void> => {
     const sequence: GlossSequence = {
       items: [{ gloss_id: glossId, chinese: '' }],
+      unmatched_words: [],
     };
     await playSequence(sequence, onComplete);
   }, [playSequence]);

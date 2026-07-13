@@ -9,13 +9,20 @@
 ## [Unreleased]
 
 ### ✨ 新增
-- feat: 配置 husky pre-commit 钩子，强制提交前更新 CHANGELOG
-
-### 🔧 修复
-- 暂无
+- feat(avatar): 新增 ClipBuilder 关键帧构建器
+- feat(avatar): 新增 JointLimits 关节限制系统
+- feat(avatar): 新增 KalidokitSolver 姿态求解器
+- feat(avatar): 新增 RealtimePoseDriver 实时姿态驱动
+- feat(avatar): 新增 VRMAnimator VRM 动画控制器
+- feat(recognition): 新增 PoseEstimator 姿态估计器
+- feat(recognition): 新增 STGCNRecognizer 时空图卷积识别器
+- feat(recognition): 新增 pose.worker 姿态检测 Worker
+- feat(hooks): 新增 usePoseTracking 姿态跟踪 Hook
+- feat: 新增 docs/ 目录整理项目文档
 
 ### 📦 维护
-- 暂无
+- chore: 迁移文档到 docs/ 目录
+- chore: 清理测试文件和临时资源
 
 ---
 

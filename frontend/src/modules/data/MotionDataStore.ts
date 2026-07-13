@@ -4,6 +4,9 @@
 import type { MotionData } from '@/types/avatar';
 import { idbAdapter, STORES } from './IndexedDBAdapter';
 import { BaseDataStore } from './BaseDataStore';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('MotionStore');
 
 /**
  * 动作数据存储
@@ -46,7 +49,7 @@ export class MotionDataStore extends BaseDataStore<MotionData> {
       this.setToCache(data.gloss_id, data);
       this.existingIds.add(data.gloss_id);
     } catch (error) {
-      console.error(`[${this.storeName}] 写入动作数据失败:`, error);
+      log.error(`[${this.storeName}] 写入动作数据失败`, error);
       throw error;
     }
   }

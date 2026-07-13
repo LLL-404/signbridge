@@ -5,6 +5,9 @@ import type { SignGloss } from '@/types/sign';
 import { idbAdapter, STORES } from './IndexedDBAdapter';
 import { BaseDataStore } from './BaseDataStore';
 import { COMMON_VOCABULARY } from './CommonVocabulary';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('VocabStore');
 
 /**
  * 词汇数据存储
@@ -115,7 +118,7 @@ export class VocabularyStore extends BaseDataStore<SignGloss> {
         this.isFullCacheLoaded = true;
       }
     } catch (err) {
-      console.warn('加载完整词汇缓存失败，使用内置常用词汇:', err);
+      log.warn('加载完整词汇缓存失败，使用内置常用词汇', err);
     }
   }
 

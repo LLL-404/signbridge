@@ -3,6 +3,9 @@ import { HAND_CONNECTIONS, type NormalizedLandmark } from '@mediapipe/hands';
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 import { HandTracker, type HandTrackerConfig } from '@/components/sign/HandTracker';
 import type { FrameKeypoints } from '@/types/recognition';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('useHandTracking');
 
 /** useHandTracking Hook 返回值 */
 export interface UseHandTrackingReturn {
@@ -127,7 +130,7 @@ export function useHandTracking(
       drawFrame(result);
     } catch (err) {
       // 单帧处理失败不中断循环，仅记录错误
-      console.error('处理帧失败:', err);
+      log.error('处理帧失败', err);
     }
 
     if (runningRef.current) {
@@ -271,3 +274,7 @@ function drawHandKeypoints(
     radius: 4,
   });
 }
+
+// 向下兼容：re-export usePoseTracking 供新代码使用
+export { usePoseTracking } from './usePoseTracking';
+export type { UsePoseTrackingReturn, UsePoseTrackingOptions } from './usePoseTracking';

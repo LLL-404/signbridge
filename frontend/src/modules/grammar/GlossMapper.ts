@@ -4,6 +4,12 @@
 import type { Token, GlossSequenceItem, GlossMapping } from '@/types/grammar';
 import type { VocabularyStore } from '@/modules/data/VocabularyStore';
 
+/** map 方法的返回结果：匹配到的词汇项 + 未匹配的中文词 */
+export interface MapResult {
+  items: GlossSequenceItem[];
+  unmatchedWords: string[];
+}
+
 /**
  * 词汇映射器
  * 将重写后的 Token 序列映射为 GlossSequenceItem 数组
@@ -28,10 +34,11 @@ export class GlossMapper {
   /**
    * 将 Token 序列映射为 GlossSequenceItem 数组
    * 优先从词汇库查询，其次从规则包映射表查询
-   * 找不到映射的词跳过
+   * 找不到映射的词收集到 unmatchedWords 返回
    */
-  async map(tokens: Token[]): Promise<GlossSequenceItem[]> {
+  async map(tokens: Token[]): Promise<MapResult> {
     const items: GlossSequenceItem[] = [];
+    const unmatchedWords: string[] = [];
 
     for (const token of tokens) {
       const glossId = await this.lookupGlossId(token.word);
@@ -40,11 +47,13 @@ export class GlossMapper {
           gloss_id: glossId,
           chinese: token.word,
         });
+      } else {
+        // 找不到映射的词收集到未匹配列表
+        unmatchedWords.push(token.word);
       }
-      // 找不到映射的词跳过（不输出 unmapped 标记，保持序列简洁）
     }
 
-    return items;
+    return { items, unmatchedWords };
   }
 
   /**

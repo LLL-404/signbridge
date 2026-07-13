@@ -31,7 +31,7 @@ describe('GlossMapper', () => {
         { word: '去', pos: 'v' },
       ];
 
-      const result = await glossMapper.map(tokens);
+      const { items: result } = await glossMapper.map(tokens);
 
       expect(result).toEqual<GlossSequenceItem[]>([
         { gloss_id: 'g_wo', chinese: '我' },
@@ -52,7 +52,7 @@ describe('GlossMapper', () => {
         { word: '看', pos: 'v' },
       ];
 
-      const result = await glossMapper.map(tokens);
+      const { items: result } = await glossMapper.map(tokens);
 
       // 未找到的词被跳过，仅保留命中的词
       expect(result).toHaveLength(1);
@@ -60,7 +60,7 @@ describe('GlossMapper', () => {
     });
 
     it('空输入：返回空数组且不查询词汇库', async () => {
-      const result = await glossMapper.map([]);
+      const { items: result } = await glossMapper.map([]);
 
       expect(result).toEqual([]);
       expect(getByChineseMock).not.toHaveBeenCalled();
@@ -75,7 +75,7 @@ describe('GlossMapper', () => {
       glossMapper.setMappings([{ chinese: '麒麟', gloss_id: 'g_unicorn' }]);
 
       const tokens: Token[] = [{ word: '麒麟', pos: 'x' }];
-      const result = await glossMapper.map(tokens);
+      const { items: result } = await glossMapper.map(tokens);
 
       expect(result).toEqual([{ gloss_id: 'g_unicorn', chinese: '麒麟' }]);
     });
@@ -92,7 +92,7 @@ describe('GlossMapper', () => {
         { word: '麒麟', pos: 'x' },
         { word: '凤凰', pos: 'x' },
       ];
-      const result = await glossMapper.map(tokens);
+      const { items: result } = await glossMapper.map(tokens);
 
       // 旧映射（麒麟）已被清除，词汇库也找不到，应被跳过
       expect(result).toEqual([{ gloss_id: 'g_phoenix', chinese: '凤凰' }]);
@@ -108,7 +108,7 @@ describe('GlossMapper', () => {
       ]);
 
       const tokens: Token[] = [{ word: '打', pos: 'v' }];
-      const result = await glossMapper.map(tokens);
+      const { items: result } = await glossMapper.map(tokens);
 
       expect(result).toEqual([{ gloss_id: 'g_da_hit', chinese: '打' }]);
     });
@@ -122,7 +122,7 @@ describe('GlossMapper', () => {
       glossMapper.setMappings([{ chinese: '我', gloss_id: 'g_extra' }]);
 
       const tokens: Token[] = [{ word: '我', pos: 'r' }];
-      const result = await glossMapper.map(tokens);
+      const { items: result } = await glossMapper.map(tokens);
 
       // 应使用词汇库的 g_vocab 而非 extraMap 的 g_extra
       expect(result).toEqual([{ gloss_id: 'g_vocab', chinese: '我' }]);

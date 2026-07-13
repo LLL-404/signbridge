@@ -17,16 +17,22 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChangeEvent } from 'react';
+import type { ChangeEvent, KeyboardEvent } from 'react';
+import type { VRM } from '@pixiv/three-vrm';
 import { VoiceInput } from '@/components/voice/VoiceInput';
 import AvatarCanvas from '@/components/avatar/AvatarCanvas';
 import { grammarEngine } from '@/modules/grammar/GrammarEngine';
 import { AvatarDriver } from '@/modules/avatar/AvatarDriver';
+import type { VRMAnimator } from '@/modules/avatar/VRMAnimator';
 import { useAvatarStore } from '@/stores/avatarStore';
 import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
 import type { BonePose, VRMPose } from '@/types/avatar';
 import type { GlossSequence, GlossSequenceItem } from '@/types/grammar';
 import { PageHeader } from '@/components/common/PageHeader';
+import { logger } from '@/modules/debug/logger';
+import { startupTracker } from '@/modules/debug/StartupTracker';
+
+const log = logger.module('VoiceToSignPage');
 
 /** 语速范围与步进 */
 const MIN_SPEED = 0.5;
@@ -48,6 +54,12 @@ export function VoiceToSignPage() {
   const [glossItems, setGlossItems] = useState<GlossSequenceItem[]>([]);
   /** 转换错误信息 */
   const [convertError, setConvertError] = useState<string | null>(null);
+  /** 未匹配到手语词汇的中文词 */
+  const [unmatchedWords, setUnmatchedWords] = useState<string[]>([]);
+  /** 文本输入框内容（手动输入中文文字） */
+  const [textInput, setTextInput] = useState('');
+  /** 管道状态：idle 空闲 / loading 加载数据 / converting 转换中 / playing 播放中 / error 错误 */
+  const [pipelineStatus, setPipelineStatus] = useState<'idle' | 'loading' | 'converting' | 'playing' | 'error'>('idle');
   /** 当前虚拟人姿态（传给 Avatar3D，旧 BonePose 轨道） */
   const [currentPose, setCurrentPose] = useState<BonePose>(NEUTRAL_POSE);
   /** 当前 VRM 姿态（新骨骼轨道，传给 VRM 模型） */
@@ -93,6 +105,8 @@ export function VoiceToSignPage() {
       } else {
         isPlayingRef.current = false;
         setIsPlaying(false);
+        // 队列空：管道回到空闲
+        setPipelineStatus('idle');
       }
     });
   };
@@ -101,19 +115,31 @@ export function VoiceToSignPage() {
   const processSentence = useCallback(async (text: string) => {
     if (!text.trim()) return;
     setConvertError(null);
+    // 进入转换阶段
+    setPipelineStatus('converting');
     try {
       // 中文文字 → 手语词汇序列
       const sequence = await grammarEngine.convert(text);
       setGlossItems(sequence.items);
+      setUnmatchedWords(sequence.unmatched_words ?? []);
+      if (sequence.items.length === 0) {
+        setConvertError('未识别到任何手语词汇');
+        // 无可播放内容：直接进入错误态（需用户重新输入）
+        setPipelineStatus('error');
+        return;
+      }
       // 流式处理：正在播放则入队，否则立即播放
       if (isPlayingRef.current) {
         queueRef.current.push(sequence);
       } else {
         playNextRef.current(sequence);
+        // 进入播放阶段（播放完成回调中重置为 idle）
+        setPipelineStatus('playing');
       }
     } catch (err) {
-      console.error('语法转换失败:', err);
+      log.error('语法转换失败', err);
       setConvertError(err instanceof Error ? err.message : '转换失败');
+      setPipelineStatus('error');
     }
   }, []);
 
@@ -133,8 +159,43 @@ export function VoiceToSignPage() {
     [processSentence],
   );
 
+  // ===== 处理文本输入提交（手动输入中文文字 → 语法引擎 → 虚拟人播放） =====
+  const handleTextInput = useCallback(() => {
+    const text = textInput.trim();
+    // 空文本不触发
+    if (!text) return;
+    log.info('文本输入提交', text);
+    void processSentence(text);
+    // 提交后清空输入框
+    setTextInput('');
+  }, [textInput, processSentence]);
+
+  // ===== 输入框按键事件：回车提交 =====
+  const handleTextKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleTextInput();
+      }
+    },
+    [handleTextInput],
+  );
+
+  // ===== VRM 加载完成回调：把 VRM 和 VRMAnimator 注入 AvatarDriver =====
+  // AvatarDriver 通过 VRMAnimator.playClip 触发动画，VRMModel 的 useFrame 调用 vrmAnimator.update(delta) 推进
+  const handleVRMLoaded = useCallback((vrm: VRM, animator: VRMAnimator) => {
+    avatarDriverRef.current?.setVRMAnimator(vrm, animator);
+    log.info('VRM 已加载并绑定到 AvatarDriver');
+  }, []);
+
   // ===== 动画循环：requestAnimationFrame 驱动 AvatarDriver =====
   useEffect(() => {
+    // 启动页面初始化与 VRM 模型加载计时
+    // 注：VRM 模型实际在子组件 AvatarCanvas/VRMModel 中异步加载，
+    // 此处计量的是页面侧驱动管线的就绪时间
+    startupTracker.start('voicesign-init', '初始化语音转手语');
+    startupTracker.start('voicesign-vrm-load', '加载 VRM 模型');
+
     const tick = (timestamp: number) => {
       const driver = avatarDriverRef.current;
       if (driver) {
@@ -154,6 +215,11 @@ export function VoiceToSignPage() {
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
+
+    // 驱动管线就绪，结束计时
+    startupTracker.end('voicesign-vrm-load');
+    startupTracker.end('voicesign-init');
+
     return () => {
       cancelAnimationFrame(rafRef.current);
       // 卸载时停止播放并释放资源
@@ -180,6 +246,8 @@ export function VoiceToSignPage() {
     queueRef.current = [];
     isPlayingRef.current = false;
     setIsPlaying(false);
+    // 手动停止：管道回到空闲
+    setPipelineStatus('idle');
   }, [setIsPlaying]);
 
   return (
@@ -195,7 +263,7 @@ export function VoiceToSignPage() {
         <div className="order-1 flex items-start justify-center lg:order-2">
           <div className="card animate-fade-up w-full overflow-hidden p-2 md:p-3" style={{ animationDelay: '120ms' }}>
             <div className="aspect-[4/5] w-full">
-              <AvatarCanvas pose={currentPose} vrmPose={currentVRMPose} width="100%" height="100%" />
+              <AvatarCanvas pose={currentPose} vrmPose={currentVRMPose} width="100%" height="100%" onVRMLoaded={handleVRMLoaded} />
             </div>
           </div>
         </div>
@@ -205,6 +273,50 @@ export function VoiceToSignPage() {
           {/* 语音输入区域 */}
           <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '80ms' }}>
             <VoiceInput onText={handleText} placeholder="点击麦克风开始说话" />
+          </div>
+
+          {/* 文本输入区域（手动输入中文文字 → 播放手语） */}
+          <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '120ms' }}>
+            <div className="mb-2 md:mb-3 flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
+              <h3 className="text-sm font-semibold text-content-primary">文本输入</h3>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                onKeyDown={handleTextKeyDown}
+                disabled={isPlaying}
+                placeholder="输入中文文字，按回车播放手语"
+                className="flex-1 rounded-lg border border-dark-600 bg-dark-900/50 px-3 py-2 text-sm md:text-base text-content-primary placeholder:text-content-muted focus:border-accent-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+              />
+              <button
+                type="button"
+                onClick={handleTextInput}
+                disabled={isPlaying}
+                className="shrink-0 rounded-lg bg-accent-500 px-4 py-2 text-xs md:text-sm font-medium text-white transition-all hover:bg-accent-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                播放手语
+              </button>
+            </div>
+            {/* 管道状态指示器：仅在非空闲时显示 */}
+            {pipelineStatus !== 'idle' && (
+              <div className="mt-2 flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${
+                  pipelineStatus === 'converting' ? 'bg-yellow-400 animate-pulse' :
+                  pipelineStatus === 'playing' ? 'bg-green-400 animate-pulse' :
+                  pipelineStatus === 'error' ? 'bg-red-400' :
+                  'bg-blue-400 animate-pulse'
+                }`} />
+                <span className="text-xs text-content-secondary">
+                  {pipelineStatus === 'loading' ? '加载数据中...' :
+                   pipelineStatus === 'converting' ? '转换中...' :
+                   pipelineStatus === 'playing' ? '播放中...' :
+                   pipelineStatus === 'error' ? (convertError ?? '错误') : ''}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* 识别文字显示 */}
@@ -247,6 +359,16 @@ export function VoiceToSignPage() {
               </div>
             ) : (
               <p className="text-sm text-content-muted">尚未生成词汇序列</p>
+            )}
+            {unmatchedWords.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className="text-xs text-content-muted">未识别：</span>
+                {unmatchedWords.map((word, idx) => (
+                  <span key={`unmatched-${idx}`} className="text-xs text-red-400/70 line-through">
+                    {word}
+                  </span>
+                ))}
+              </div>
             )}
           </div>
         </div>

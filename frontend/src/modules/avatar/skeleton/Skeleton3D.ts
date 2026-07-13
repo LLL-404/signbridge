@@ -210,61 +210,48 @@ export class Skeleton3D {
       { x: side === 'left' ? 0.035 : -0.035, y: -0.032, z: 0.012 }, // 小指
     ];
 
+    // 拇指关节名（比其他四指多一个 CMC 关节）
+    const thumbJoints = ['cmc', 'mcp', 'pip', 'dip'] as const;
+
     for (let fi = 0; fi < FINGER_NAMES.length; fi++) {
       const fingerName = FINGER_NAMES[fi];
       const lengths = FINGER_LENGTHS[fingerName];
       const rootOffset = fingerRoots[fi];
-      let parentBone = wristBone;
+      const joints = fingerName === 'thumb' ? thumbJoints : FINGER_JOINTS;
+      this.buildFingerChain(side, fingerName, joints, lengths, rootOffset, wristBone);
+    }
+  }
 
-      if (fingerName === 'thumb') {
-        // 拇指：CMC 根部在 wrist 的 rootOffset，之后 MCP/PIP/DIP 依次沿 -Y 方向
-        const cmcLen = lengths[0];
-        const cmc = new THREE.Bone();
-        cmc.name = `${side}_thumb_cmc`;
-        cmc.position.set(rootOffset.x, rootOffset.y, rootOffset.z);
-        parentBone.add(cmc);
-        this.bones.set(`${side}_thumb_cmc`, cmc);
+  /**
+   * 构建单个手指的关节链
+   * 第一个关节使用 rootOffset 定位（相对父骨骼），后续关节沿局部 -Y 方向依次延伸，
+   * 偏移量为前一关节的长度。
+   */
+  private buildFingerChain(
+    side: 'left' | 'right',
+    fingerName: string,
+    joints: readonly string[],
+    lengths: number[],
+    rootOffset: Vec3,
+    parentBone: THREE.Bone,
+  ): void {
+    let currentParent = parentBone;
 
-        const mcpLen = lengths[1];
-        const mcp = new THREE.Bone();
-        mcp.name = `${side}_thumb_mcp`;
-        // MCP 相对 CMC 沿 CMC 局部 -Y 方向（CMC 会做对掌旋转，所以子节用本地坐标）
-        mcp.position.set(0, -cmcLen, 0);
-        cmc.add(mcp);
-        this.bones.set(`${side}_thumb_mcp`, mcp);
+    for (let i = 0; i < joints.length; i++) {
+      const boneName = `${side}_${fingerName}_${joints[i]}`;
+      const bone = new THREE.Bone();
+      bone.name = boneName;
 
-        const pipLen = lengths[2];
-        const pip = new THREE.Bone();
-        pip.name = `${side}_thumb_pip`;
-        pip.position.set(0, -mcpLen, 0);
-        mcp.add(pip);
-        this.bones.set(`${side}_thumb_pip`, pip);
-
-        const dipLen = lengths[3] ?? 0;
-        const dip = new THREE.Bone();
-        dip.name = `${side}_thumb_dip`;
-        dip.position.set(0, -pipLen, 0);
-        pip.add(dip);
-        this.bones.set(`${side}_thumb_dip`, dip);
-        void dipLen;
+      if (i === 0) {
+        bone.position.set(rootOffset.x, rootOffset.y, rootOffset.z);
       } else {
-        // 其他四指：MCP 根部在 rootOffset，之后 PIP/DIP 沿 -Y
-        for (let ji = 0; ji < FINGER_JOINTS.length; ji++) {
-          const jointName = FINGER_JOINTS[ji];
-          const boneName = `${side}_${fingerName}_${jointName}`;
-          const bone = new THREE.Bone();
-          bone.name = boneName;
-          if (ji === 0) {
-            bone.position.set(rootOffset.x, rootOffset.y, rootOffset.z);
-          } else {
-            const prevLen = lengths[ji - 1] ?? 0.04;
-            bone.position.set(0, -prevLen, 0);
-          }
-          parentBone.add(bone);
-          this.bones.set(boneName, bone);
-          parentBone = bone;
-        }
+        const prevLen = lengths[i - 1] ?? 0.04;
+        bone.position.set(0, -prevLen, 0);
       }
+
+      currentParent.add(bone);
+      this.bones.set(boneName, bone);
+      currentParent = bone;
     }
   }
 

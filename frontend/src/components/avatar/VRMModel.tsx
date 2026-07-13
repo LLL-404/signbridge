@@ -1,553 +1,109 @@
 /**
  * VRM 虚拟人 3D 渲染组件
  *
- * 使用 drei useGLTF + VRMLoaderPlugin 加载标准 VRM 模型，
- * 将 AvatarDriver 生成的 BonePose 映射到 VRM 人形骨骼。
+ * 使用 drei useGLTF + VRMLoaderPlugin 加载标准 VRM 模型。
  *
- * 支持：
- *   - 骨骼驱动（身体 + 下肢 + 手指）
- *   - 骨骼重定向（T-pose → A-pose 差异校正）
- *   - 平滑滤波（One-Euro Filter）
- *   - 面部表情（blendshape）
- *   - 自动眨眼
- *   - 注视跟踪
+ * 新架构下 VRM 动画由 VRMAnimator（封装 THREE.AnimationMixer）驱动：
+ *   - AvatarDriver 调用 ClipBuilder.buildClip(gloss, vrm) 生成 AnimationClip
+ *   - AvatarDriver 调用 vrmAnimator.playClip(clip, fadeIn) 播放
+ *   - VRMModel 的 useFrame 只调用 vrmAnimator.update(delta) + vrm.update(delta)
+ *
+ * 保留：
+ *   - VRM 加载逻辑（VRMLoaderPlugin）
+ *   - 实时姿态追踪路径（RealtimePoseDriver）
+ *   - lookAt 注视跟踪
+ *
+ * 移除（被 AnimationMixer 替代）：
+ *   - applyVRMPose / applyLimbIK 手动骨骼操作
+ *   - BoneSmoother 平滑
+ *   - Retargeter T-pose 校正
+ *   - IK 调试可视化
+ *   - 手指/表情/头部运动手动驱动
  */
-import { useRef, useEffect, useMemo, useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, type VRM } from '@pixiv/three-vrm';
-import type { BonePose, VRMPose, VRMBoneName } from '@/types/avatar';
-import { FacialExpression, HeadMovement, HandShape } from '@/types/sign';
-import { getHandShapeDefinition, handShapeToBoneRotations } from '@/modules/avatar/HandShape';
-import { retargetRotation } from '@/modules/avatar/Retargeter';
-import { BoneSmoother } from '@/modules/avatar/Smoother';
-import { solve as solveArm, solveLeg } from '@/modules/avatar/IKSolver';
+import { VRMAnimator } from '@/modules/avatar/VRMAnimator';
+import { VRMAdapter } from '@/modules/avatar/VRMAdapter';
+import { RealtimePoseDriver } from '@/modules/avatar/RealtimePoseDriver';
+import type { PoseEstimate } from '@/modules/recognition/PoseEstimator';
+import type { BonePose, VRMPose } from '@/types/avatar';
+import { logger } from '@/modules/debug/logger';
 
-// 身体骨骼映射：AvatarDriver 内部名称 → VRM humanoid 标准骨骼名称
-// 含躯干、上肢、下肢，覆盖完整人形骨架
-const BODY_BONE_MAP: Record<string, string> = {
-  root: 'hips',
-  spine: 'spine',
-  chest: 'chest',
-  neck: 'neck',
-  head: 'head',
-  // 上肢：内部 shoulder/elbow/wrist 对应 VRM shoulder/upperArm/lowerArm
-  left_shoulder: 'leftShoulder',
-  left_elbow: 'leftUpperArm',
-  left_wrist: 'leftLowerArm',
-  right_shoulder: 'rightShoulder',
-  right_elbow: 'rightUpperArm',
-  right_wrist: 'rightLowerArm',
-  // 下肢：内部 hip/knee/ankle 对应 VRM upperLeg/lowerLeg/foot
-  left_hip: 'leftUpperLeg',
-  left_knee: 'leftLowerLeg',
-  left_ankle: 'leftFoot',
-  right_hip: 'rightUpperLeg',
-  right_knee: 'rightLowerLeg',
-  right_ankle: 'rightFoot',
-};
-
-/**
- * 手指骨骼映射：每只手 5 指 × 3 关节 = 15 个 VRM 骨骼
- *
- * 内部 HandShapeDefinition.fingers 顺序：[拇指, 食指, 中指, 无名指, 小指]
- * 每根手指定义包含 mcp / pip / dip 三个屈曲角度
- *
- * VRM 拇指：Metacarpal / Proximal / Distal（无 PIP，3 节）
- * VRM 其他手指：Proximal / Intermediate / Distal（3 节）
- *
- * 映射时将内部 (fingerIndex, joint) 对应到 VRM 骨骼：
- *   - 拇指 cmc→Metacarpal, mcp→Proximal, pip→Distal（内部 dip 丢弃，因 VRM 仅 3 节）
- *   - 其他 mcp→Proximal, pip→Intermediate, dip→Distal
- */
-interface FingerJointMap {
-  vrm: string;
-  fingerIndex: number;
-  joint: 'mcp' | 'pip' | 'dip';
-}
-
-const FINGER_BONE_MAP: Record<'left' | 'right', FingerJointMap[]> = {
-  left: [
-    // 拇指（fingerIndex=0）
-    { vrm: 'leftThumbMetacarpal', fingerIndex: 0, joint: 'mcp' },
-    { vrm: 'leftThumbProximal', fingerIndex: 0, joint: 'pip' },
-    { vrm: 'leftThumbDistal', fingerIndex: 0, joint: 'dip' },
-    // 食指（fingerIndex=1）
-    { vrm: 'leftIndexProximal', fingerIndex: 1, joint: 'mcp' },
-    { vrm: 'leftIndexIntermediate', fingerIndex: 1, joint: 'pip' },
-    { vrm: 'leftIndexDistal', fingerIndex: 1, joint: 'dip' },
-    // 中指（fingerIndex=2）
-    { vrm: 'leftMiddleProximal', fingerIndex: 2, joint: 'mcp' },
-    { vrm: 'leftMiddleIntermediate', fingerIndex: 2, joint: 'pip' },
-    { vrm: 'leftMiddleDistal', fingerIndex: 2, joint: 'dip' },
-    // 无名指（fingerIndex=3）
-    { vrm: 'leftRingProximal', fingerIndex: 3, joint: 'mcp' },
-    { vrm: 'leftRingIntermediate', fingerIndex: 3, joint: 'pip' },
-    { vrm: 'leftRingDistal', fingerIndex: 3, joint: 'dip' },
-    // 小指（fingerIndex=4）
-    { vrm: 'leftLittleProximal', fingerIndex: 4, joint: 'mcp' },
-    { vrm: 'leftLittleIntermediate', fingerIndex: 4, joint: 'pip' },
-    { vrm: 'leftLittleDistal', fingerIndex: 4, joint: 'dip' },
-  ],
-  right: [
-    { vrm: 'rightThumbMetacarpal', fingerIndex: 0, joint: 'mcp' },
-    { vrm: 'rightThumbProximal', fingerIndex: 0, joint: 'pip' },
-    { vrm: 'rightThumbDistal', fingerIndex: 0, joint: 'dip' },
-    { vrm: 'rightIndexProximal', fingerIndex: 1, joint: 'mcp' },
-    { vrm: 'rightIndexIntermediate', fingerIndex: 1, joint: 'pip' },
-    { vrm: 'rightIndexDistal', fingerIndex: 1, joint: 'dip' },
-    { vrm: 'rightMiddleProximal', fingerIndex: 2, joint: 'mcp' },
-    { vrm: 'rightMiddleIntermediate', fingerIndex: 2, joint: 'pip' },
-    { vrm: 'rightMiddleDistal', fingerIndex: 2, joint: 'dip' },
-    { vrm: 'rightRingProximal', fingerIndex: 3, joint: 'mcp' },
-    { vrm: 'rightRingIntermediate', fingerIndex: 3, joint: 'pip' },
-    { vrm: 'rightRingDistal', fingerIndex: 3, joint: 'dip' },
-    { vrm: 'rightLittleProximal', fingerIndex: 4, joint: 'mcp' },
-    { vrm: 'rightLittleIntermediate', fingerIndex: 4, joint: 'pip' },
-    { vrm: 'rightLittleDistal', fingerIndex: 4, joint: 'dip' },
-  ],
-};
-
-// 表情映射：AvatarDriver FacialExpression → VRM expression preset
-const EXPRESSION_MAP: Record<string, string> = {
-  [FacialExpression.NEUTRAL]: 'neutral',
-  [FacialExpression.HAPPY]: 'happy',
-  [FacialExpression.SAD]: 'sad',
-  [FacialExpression.ANGRY]: 'angry',
-  [FacialExpression.SURPRISED]: 'surprised',
-  [FacialExpression.CONFUSED]: 'sad',
-  [FacialExpression.QUESTION]: 'surprised',
-  [FacialExpression.NEGATIVE]: 'angry',
-  [FacialExpression.EMPHASIS]: 'angry',
-};
-
-/**
- * 驱动单只手的手指骨骼
- * 从 HandShape 查表获取角度，映射到 VRM 手指骨骼的 X 轴屈曲
- */
-function driveHandFingers(
-  humanoid: VRM['humanoid'],
-  shape: HandShape,
-  side: 'left' | 'right',
-): void {
-  const def = getHandShapeDefinition(shape);
-  const mapping = FINGER_BONE_MAP[side];
-  for (const { vrm, fingerIndex, joint } of mapping) {
-    const fingerDef = def.fingers[fingerIndex];
-    if (!fingerDef) continue;
-    const angle = joint === 'mcp' ? fingerDef.mcp : joint === 'pip' ? fingerDef.pip : fingerDef.dip;
-    const boneNode = humanoid.getRawBoneNode(vrm as never);
-    if (!boneNode) continue;
-    // VRM 手指屈曲绕本地 X 轴；保留 Y/Z 为 0 避免侧偏
-    boneNode.rotation.set(angle, 0, 0);
-  }
-}
-
-/** 标准人体比例（与 AvatarDriver VRM_LOCATION_OFFSETS 一致） */
-const STANDARD_SHOULDER_Y = 0.50;
-const STANDARD_HEAD_TOP_Y = 0.80;
-const STANDARD_SHOULDER_HALF_WIDTH = 0.22;
-
-/** 缓存每个 VRM 模型原始 hips 本地位置，避免被覆盖 */
-const ORIGINAL_HIPS_POS = new WeakMap<VRM, THREE.Vector3>();
-
-/** 缓存每个 VRM 模型的实际尺寸比例（肩高、肩宽半幅、头顶高），用于缩放 HandLocation 偏移 */
-interface ModelScale {
-  /** hips 到肩峰的实际高度（世界坐标 Y 差，米） */
-  shoulderY: number;
-  /** 实际肩宽半幅（世界坐标 |X|，米） */
-  shoulderHalfWidth: number;
-  /** hips 到头顶的实际高度（世界坐标 Y 差，米） */
-  headTopY: number;
-}
-const MODEL_SCALE = new WeakMap<VRM, ModelScale>();
-
-/** 缓存每个骨骼在 rest pose 下的世界方向（单位向量，指向子关节） */
-const REST_WORLD_DIR = new WeakMap<VRM, Map<string, THREE.Vector3>>();
-
-/** 读取骨骼世界位置 */
-function getBoneWorldPos(node: THREE.Object3D | null, out: THREE.Vector3): THREE.Vector3 {
-  if (node) node.getWorldPosition(out);
-  return out;
-}
-
-/** 计算骨骼长度：子骨骼相对父骨骼的平移距离（rest pose 下即骨骼长度） */
-function getBoneLength(childNode: THREE.Object3D | null, fallback: number): number {
-  if (!childNode) return fallback;
-  const len = childNode.position.length();
-  // 过滤异常值（0 或过大），用 fallback
-  return len > 0.001 && len < 2.0 ? len : fallback;
-}
-
-/** 首次调用时从模型真实骨骼读取尺寸比例，后续从缓存取 */
-function getModelScale(vrm: VRM): ModelScale {
-  const cached = MODEL_SCALE.get(vrm);
-  if (cached) return cached;
-  const humanoid = vrm.humanoid;
-  const hipsNode = humanoid.getRawBoneNode('hips' as never);
-  const leftShoulder = humanoid.getRawBoneNode('leftShoulder' as never);
-  const rightShoulder = humanoid.getRawBoneNode('rightShoulder' as never);
-  const headNode = humanoid.getRawBoneNode('head' as never);
-  const hipsWorld = getBoneWorldPos(hipsNode, new THREE.Vector3());
-  const leftWorld = getBoneWorldPos(leftShoulder, new THREE.Vector3());
-  const rightWorld = getBoneWorldPos(rightShoulder, new THREE.Vector3());
-  const headWorld = getBoneWorldPos(headNode, new THREE.Vector3());
-  const shoulderY = Math.abs(((leftWorld.y + rightWorld.y) / 2) - hipsWorld.y) || STANDARD_SHOULDER_Y;
-  const shoulderHalfWidth = Math.abs(rightWorld.x - leftWorld.x) / 2 || STANDARD_SHOULDER_HALF_WIDTH;
-  const headTopY = Math.abs(headWorld.y - hipsWorld.y) + 0.10 || STANDARD_HEAD_TOP_Y;
-  const scale: ModelScale = { shoulderY, shoulderHalfWidth, headTopY };
-  MODEL_SCALE.set(vrm, scale);
-  return scale;
-}
-
-/**
- * 读取骨骼在 rest pose 下的世界方向（从父关节指向子关节）
- * VRM 模型加载后未施加任何旋转前，骨骼的"延伸方向"= 子节点世界位置 - 父节点世界位置
- * 用于 IK 反算时正确匹配模型真实 rest pose（T-pose/A-pose 均可）
- */
-function getRestWorldDir(vrm: VRM, boneName: string): THREE.Vector3 {
-  let cache = REST_WORLD_DIR.get(vrm);
-  if (!cache) {
-    cache = new Map();
-    REST_WORLD_DIR.set(vrm, cache);
-  }
-  const cached = cache.get(boneName);
-  if (cached) return cached;
-  const humanoid = vrm.humanoid;
-  const node = humanoid.getRawBoneNode(boneName as never);
-  // rest 方向 = 第一个子节点位置 - 自身位置（骨骼指向子关节）
-  let dir = new THREE.Vector3(0, -1, 0); // 兜底
-  if (node && node.children.length > 0) {
-    const childWorld = getBoneWorldPos(node.children[0], new THREE.Vector3());
-    const selfWorld = getBoneWorldPos(node, new THREE.Vector3());
-    dir = childWorld.sub(selfWorld).normalize();
-  }
-  cache.set(boneName, dir);
-  return dir;
-}
-
-/**
- * Y 轴分区间缩放：适配不同头身比
- * - y ≤ STANDARD_SHOULDER_Y (0.50)：肩及以下，按"实际肩高/标准肩高"缩放
- * - y > STANDARD_SHOULDER_Y：肩以上，在 [肩, 头顶] 区间插值
- *   归一化 t = (y - 0.50) / (0.80 - 0.50)
- *   实际 y = 实际肩高 + t * (实际头顶高 - 实际肩高)
- */
-function scaleOffsetY(y: number, scale: ModelScale): number {
-  if (y <= STANDARD_SHOULDER_Y) {
-    // 肩及以下：按肩高比例缩放（含负值如 NEUTRAL 下垂）
-    return y * (scale.shoulderY / STANDARD_SHOULDER_Y);
-  }
-  // 肩以上：在 [肩, 头顶] 区间插值
-  const t = (y - STANDARD_SHOULDER_Y) / (STANDARD_HEAD_TOP_Y - STANDARD_SHOULDER_Y);
-  return scale.shoulderY + t * (scale.headTopY - scale.shoulderY);
-}
-
-/**
- * 应用 VRMPose 到 VRM 模型（新骨骼驱动路径）
- *
- * 坐标体系约定：
- *   - VRMPose.ikTargets 存"相对 hips 的归一化偏移"（单位：米，基于标准人体比例）
- *   - VRMPose.bones.hips.position 存"相对模型原始 hips 位置的偏移"
- *
- * 三部分：
- *   1. 显式骨骼 rotation：遍历 pose.bones，retarget + smooth 后写入 node.rotation
- *      hips.position 直接当相对偏移叠加到模型原始 hips 本地位置
- *   2. IK 目标反算：按模型实际肩高/肩宽缩放偏移，
- *      realWorld = hipsWorld + scaledOffset，再 scene.worldToLocal 转本地坐标
- *   3. 手形驱动：pose.handShapes 指定时，用 handShapeToBoneRotations 写入手指骨骼
- *
- * @param vrm VRM 模型实例
- * @param pose VRM 标准姿态
- * @param smoother BoneSmoother 实例（与旧路径共享）
- * @param timestamp 当前时间戳（毫秒，与旧路径一致用 state.clock.elapsedTime * 1000）
- */
-function applyVRMPose(
-  vrm: VRM,
-  pose: VRMPose,
-  smoother: BoneSmoother,
-  timestamp: number,
-): void {
-  const humanoid = vrm.humanoid;
-  const scene = vrm.scene;
-  const hipsNode = humanoid.getRawBoneNode('hips' as never);
-
-  // 首次调用时记录模型原始 hips 本地位置（rest pose）
-  if (hipsNode && !ORIGINAL_HIPS_POS.has(vrm)) {
-    ORIGINAL_HIPS_POS.set(vrm, hipsNode.position.clone());
-  }
-  const originalHips = ORIGINAL_HIPS_POS.get(vrm) ?? new THREE.Vector3(0, 0.9, 0);
-  // 读取模型实际尺寸比例（首次计算后缓存）
-  const scale = getModelScale(vrm);
-  // X 缩放因子：模型实际肩宽半幅 / 标准肩宽半幅
-  const xScale = scale.shoulderHalfWidth / STANDARD_SHOULDER_HALF_WIDTH;
-
-  // ===== 1. 显式骨骼 rotation（含 retarget + smooth）=====
-  for (const [boneName, transform] of Object.entries(pose.bones)) {
-    const vrmBoneName = boneName as VRMBoneName;
-    const node = humanoid.getRawBoneNode(vrmBoneName as never);
-    if (!node) continue;
-    const retargeted = retargetRotation(vrmBoneName, transform.rotation);
-    const smoothed = smoother.smooth(vrmBoneName, retargeted, timestamp);
-    node.rotation.set(smoothed.x, smoothed.y, smoothed.z);
-    // hips 位移：position 是"相对模型原始 hips 位置的偏移"，直接叠加
-    if (transform.position && vrmBoneName === 'hips') {
-      node.position.set(
-        originalHips.x + transform.position.x,
-        originalHips.y + transform.position.y,
-        originalHips.z + transform.position.z,
-      );
-    }
-  }
-
-  // ===== 2. IK 目标反算（世界四元数 + 父逆，正确连接骨骼链）=====
-  if (pose.ikTargets) {
-    const hipsWorld = getBoneWorldPos(hipsNode, new THREE.Vector3());
-
-    // 偏移 → 场景本地坐标（同前：分区间缩放 + 场景旋转补偿）
-    const sceneQuat = scene.quaternion;
-    const toSceneLocal = (offset: { x: number; y: number; z: number }): THREE.Vector3 => {
-      const scaled = new THREE.Vector3(
-        offset.x * xScale,
-        scaleOffsetY(offset.y, scale),
-        offset.z,
-      );
-      const worldOffset = scaled.applyQuaternion(sceneQuat);
-      const realWorld = hipsWorld.clone().add(worldOffset);
-      return scene.worldToLocal(realWorld);
-    };
-
-    /**
-     * 应用 2 段 IK 到骨骼链（世界四元数 + 父逆，关节正确连接）
-     *
-     * 原理：
-     *   - solveArm/solveLeg 返回每段骨骼的"世界旋转增量"（把 rest 方向转到目标方向）
-     *   - 但 node.rotation 是本地欧拉角（相对父节点）
-     *   - 正确转换：本地四元数 = 父世界四元数⁻¹ × 目标世界四元数
-     *   - 目标世界四元数 = rest世界四元数 × IK增量四元数
-     *
-     * 这样无论父骨骼（chest/hips）如何旋转，子骨骼都能正确接力，关节不断裂。
-     *
-     * @param vrm VRM 模型
-     * @param upperBoneName 上段骨骼名（如 rightUpperArm）
-     * @param lowerBoneName 下段骨骼名（如 rightLowerArm）
-     * @param ikRots IK 返回的旋转（上段、下段，欧拉角）
-     * @param smootherKey smoother 缓存键前缀
-     * @param smoother BoneSmoother 实例
-     * @param timestamp 时间戳
-     */
-    const applyLimbIK = (
-      vrm: VRM,
-      upperBoneName: string,
-      lowerBoneName: string,
-      ikRots: { upper: { x: number; y: number; z: number }; lower: { x: number; y: number; z: number } },
-      smootherKeyPrefix: string,
-      smoother: BoneSmoother,
-      timestamp: number,
-    ): void => {
-      const humanoid = vrm.humanoid;
-      const upperNode = humanoid.getRawBoneNode(upperBoneName as never);
-      const lowerNode = humanoid.getRawBoneNode(lowerBoneName as never);
-      if (!upperNode || !lowerNode) return;
-
-      // 1. 读 rest 世界方向（模型真实 T-pose/A-pose，首次缓存）
-      const upperRestDir = getRestWorldDir(vrm, upperBoneName);
-      const lowerRestDir = getRestWorldDir(vrm, lowerBoneName);
-
-      // 2. IK 增量四元数（从欧拉角恢复）
-      const upperDeltaQuat = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(ikRots.upper.x, ikRots.upper.y, ikRots.upper.z, 'XYZ'),
-      );
-      const lowerDeltaQuat = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(ikRots.lower.x, ikRots.lower.y, ikRots.lower.z, 'XYZ'),
-      );
-
-      // 3. rest 世界四元数（把 -Y 转到 rest 方向，与 solve 的 BONE_REST_DIR=(0,-1,0) 对齐）
-      const upperRestQuat = new THREE.Quaternion().setFromUnitVectors(
-        new THREE.Vector3(0, -1, 0), upperRestDir,
-      );
-      const lowerRestQuat = new THREE.Quaternion().setFromUnitVectors(
-        new THREE.Vector3(0, -1, 0), lowerRestDir,
-      );
-
-      // 4. 目标世界四元数 = rest 世界四元数 × IK 增量
-      //    （IK 增量是"在 rest 基础上的旋转"，所以右乘）
-      const upperTargetWorldQuat = upperRestQuat.clone().multiply(upperDeltaQuat);
-      const lowerTargetWorldQuat = lowerRestQuat.clone().multiply(lowerDeltaQuat);
-
-      // 5. 父节点世界四元数
-      const upperParentWorldQuat = new THREE.Quaternion();
-      if (upperNode.parent) {
-        upperNode.parent.getWorldQuaternion(upperParentWorldQuat);
-      }
-
-      // 6. 上段本地四元数 = 父世界⁻¹ × 目标世界
-      const upperLocalQuat = upperParentWorldQuat.clone().invert().multiply(upperTargetWorldQuat);
-      // 平滑后写入（四元数平滑：转欧拉角用 smoother，再转回四元数写 node.quaternion）
-      const upperEuler = new THREE.Euler().setFromQuaternion(upperLocalQuat, 'XYZ');
-      const upperSmoothed = smoother.smooth(
-        `${smootherKeyPrefix}_${upperBoneName}`,
-        { x: upperEuler.x, y: upperEuler.y, z: upperEuler.z },
-        timestamp,
-      );
-      upperNode.quaternion.setFromEuler(
-        new THREE.Euler(upperSmoothed.x, upperSmoothed.y, upperSmoothed.z, 'XYZ'),
-      );
-
-      // 7. 下段：父节点是上段，需要用上段"当前已写入"的世界四元数
-      //    （上段刚写入 quaternion，但 matrixWorld 可能未更新，手动算：父世界 × 上段本地）
-      const lowerParentWorldQuat = upperParentWorldQuat.clone().multiply(upperLocalQuat);
-      const lowerLocalQuat = lowerParentWorldQuat.clone().invert().multiply(lowerTargetWorldQuat);
-      const lowerEuler = new THREE.Euler().setFromQuaternion(lowerLocalQuat, 'XYZ');
-      const lowerSmoothed = smoother.smooth(
-        `${smootherKeyPrefix}_${lowerBoneName}`,
-        { x: lowerEuler.x, y: lowerEuler.y, z: lowerEuler.z },
-        timestamp,
-      );
-      lowerNode.quaternion.setFromEuler(
-        new THREE.Euler(lowerSmoothed.x, lowerSmoothed.y, lowerSmoothed.z, 'XYZ'),
-      );
-    };
-
-    // 右手 IK
-    if (pose.ikTargets.rightHand) {
-      const upperArmNode = humanoid.getRawBoneNode('rightUpperArm' as never);
-      const lowerArmNode = humanoid.getRawBoneNode('rightLowerArm' as never);
-      const handNode = humanoid.getRawBoneNode('rightHand' as never);
-      const shoulderWorld = getBoneWorldPos(upperArmNode, new THREE.Vector3());
-      const shoulderLocal = scene.worldToLocal(shoulderWorld.clone());
-      const targetLocal = toSceneLocal(pose.ikTargets.rightHand);
-      const upperArmLen = getBoneLength(lowerArmNode, 0.28);
-      const forearmLen = getBoneLength(handNode, 0.26);
-      const ik = solveArm(
-        { x: shoulderLocal.x, y: shoulderLocal.y, z: shoulderLocal.z },
-        { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
-        upperArmLen, forearmLen, 'right',
-      );
-      applyLimbIK(vrm, 'rightUpperArm', 'rightLowerArm',
-        { upper: ik.shoulderRotation, lower: ik.elbowRotation },
-        'vrm', smoother, timestamp);
-    }
-    // 左手 IK
-    if (pose.ikTargets.leftHand) {
-      const upperArmNode = humanoid.getRawBoneNode('leftUpperArm' as never);
-      const lowerArmNode = humanoid.getRawBoneNode('leftLowerArm' as never);
-      const handNode = humanoid.getRawBoneNode('leftHand' as never);
-      const shoulderWorld = getBoneWorldPos(upperArmNode, new THREE.Vector3());
-      const shoulderLocal = scene.worldToLocal(shoulderWorld.clone());
-      const targetLocal = toSceneLocal(pose.ikTargets.leftHand);
-      const upperArmLen = getBoneLength(lowerArmNode, 0.28);
-      const forearmLen = getBoneLength(handNode, 0.26);
-      const ik = solveArm(
-        { x: shoulderLocal.x, y: shoulderLocal.y, z: shoulderLocal.z },
-        { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
-        upperArmLen, forearmLen, 'left',
-      );
-      applyLimbIK(vrm, 'leftUpperArm', 'leftLowerArm',
-        { upper: ik.shoulderRotation, lower: ik.elbowRotation },
-        'vrm', smoother, timestamp);
-    }
-    // 右脚 IK
-    if (pose.ikTargets.rightFoot) {
-      const upperLegNode = humanoid.getRawBoneNode('rightUpperLeg' as never);
-      const lowerLegNode = humanoid.getRawBoneNode('rightLowerLeg' as never);
-      const footNode = humanoid.getRawBoneNode('rightFoot' as never);
-      const hipWorld = getBoneWorldPos(upperLegNode, new THREE.Vector3());
-      const hipLocal = scene.worldToLocal(hipWorld.clone());
-      const targetLocal = toSceneLocal(pose.ikTargets.rightFoot);
-      const thighLen = getBoneLength(lowerLegNode, 0.42);
-      const shinLen = getBoneLength(footNode, 0.42);
-      const ik = solveLeg(
-        { x: hipLocal.x, y: hipLocal.y, z: hipLocal.z },
-        { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
-        thighLen, shinLen,
-      );
-      applyLimbIK(vrm, 'rightUpperLeg', 'rightLowerLeg',
-        { upper: ik.hipRotation, lower: ik.kneeRotation },
-        'vrm', smoother, timestamp);
-    }
-    // 左脚 IK
-    if (pose.ikTargets.leftFoot) {
-      const upperLegNode = humanoid.getRawBoneNode('leftUpperLeg' as never);
-      const lowerLegNode = humanoid.getRawBoneNode('leftLowerLeg' as never);
-      const footNode = humanoid.getRawBoneNode('leftFoot' as never);
-      const hipWorld = getBoneWorldPos(upperLegNode, new THREE.Vector3());
-      const hipLocal = scene.worldToLocal(hipWorld.clone());
-      const targetLocal = toSceneLocal(pose.ikTargets.leftFoot);
-      const thighLen = getBoneLength(lowerLegNode, 0.42);
-      const shinLen = getBoneLength(footNode, 0.42);
-      const ik = solveLeg(
-        { x: hipLocal.x, y: hipLocal.y, z: hipLocal.z },
-        { x: targetLocal.x, y: targetLocal.y, z: targetLocal.z },
-        thighLen, shinLen,
-      );
-      applyLimbIK(vrm, 'leftUpperLeg', 'leftLowerLeg',
-        { upper: ik.hipRotation, lower: ik.kneeRotation },
-        'vrm', smoother, timestamp);
-    }
-  }
-
-  // ===== 3. 手形驱动（直接写手指骨骼，不走 retarget/smooth）=====
-  if (pose.handShapes) {
-    if (pose.handShapes.right) {
-      const rotations = handShapeToBoneRotations(pose.handShapes.right, 'right');
-      for (const [boneName, rot] of Object.entries(rotations)) {
-        if (!rot) continue;
-        const node = humanoid.getRawBoneNode(boneName as never);
-        if (node) node.rotation.set(rot.x, rot.y, rot.z);
-      }
-    }
-    if (pose.handShapes.left) {
-      const rotations = handShapeToBoneRotations(pose.handShapes.left, 'left');
-      for (const [boneName, rot] of Object.entries(rotations)) {
-        if (!rot) continue;
-        const node = humanoid.getRawBoneNode(boneName as never);
-        if (node) node.rotation.set(rot.x, rot.y, rot.z);
-      }
-    }
-  }
-}
+const log = logger.module('VRMModel');
 
 /** VRMModel Props */
 export interface VRMModelProps {
-  /** 当前姿态（旧 BonePose，作 fallback） */
+  /** 当前姿态（旧 BonePose，保留 prop 兼容调用方，新架构不再使用） */
   pose: BonePose;
-  /** VRM 标准姿态（新路径，提供时优先于 pose） */
+  /** VRM 标准姿态（保留 prop 兼容调用方，新架构不再使用） */
   vrmPose?: VRMPose;
   /** VRM 模型路径（public 目录下的相对路径） */
   modelUrl?: string;
   /** 注视目标（世界坐标） */
   lookAtTarget?: THREE.Vector3 | null;
-  /** 加载完成回调 */
-  onLoaded?: (vrm: VRM) => void;
+  /**
+   * 加载完成回调
+   * 同时传递 VRM 和 VRMAnimator 实例，供上层（AvatarDriver）连接使用
+   */
+  onLoaded?: (vrm: VRM, animator: VRMAnimator) => void;
+  /**
+   * 是否启用实时姿态追踪驱动（与离线播放互斥）。
+   * 启用时：每帧调用 RealtimePoseDriver.update(realtimePoseEstimate, delta)
+   * 禁用时：走 VRMAnimator 离线驱动路径
+   */
+  useRealtimeTracking?: boolean;
+  /** 实时姿态估计结果（由 usePoseTracking Hook 提供；仅在 useRealtimeTracking=true 时使用） */
+  realtimePoseEstimate?: PoseEstimate | null;
 }
 
 /** VRM 虚拟人模型组件 */
 export function VRMModel({
-  pose,
-  vrmPose,
+  pose: _pose,
+  vrmPose: _vrmPose,
   modelUrl = `${import.meta.env.BASE_URL}models/avatar.vrm`,
   lookAtTarget,
   onLoaded,
+  useRealtimeTracking = false,
+  realtimePoseEstimate = null,
 }: VRMModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const vrmRef = useRef<VRM | null>(null);
-  const poseRef = useRef<BonePose>(pose);
-  const vrmPoseRef = useRef<VRMPose | null>(vrmPose ?? null);
-  const blinkTimerRef = useRef(0);
-  const isBlinkingRef = useRef(false);
-  const blinkOpenRef = useRef(1);
-  const headAnimTimeRef = useRef(0);
-  const smoother = useMemo(() => new BoneSmoother(1.5, 0.01), []);
+  /** VRMAnimator 实例（封装 AnimationMixer），在 VRM 加载成功后创建 */
+  const vrmAnimatorRef = useRef<VRMAnimator | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // 更新 pose 引用
+  // ===== 实时姿态驱动相关实例（保留实时追踪路径）=====
+  // VRMAdapter 包装已加载的 VRM，供 RealtimePoseDriver 使用
+  // 通过类型断言绑定已加载的 VRM 实例，避免重复加载模型
+  const vrmAdapterRef = useRef<VRMAdapter | null>(null);
+  if (vrmAdapterRef.current === null) {
+    vrmAdapterRef.current = new VRMAdapter();
+  }
+  // RealtimePoseDriver 连接 KalidokitSolver → VRMAdapter.applyRealtimePose
+  const realtimeDriverRef = useRef<RealtimePoseDriver | null>(null);
+  if (realtimeDriverRef.current === null) {
+    realtimeDriverRef.current = new RealtimePoseDriver();
+    realtimeDriverRef.current.attach(vrmAdapterRef.current);
+  }
+  // 用 ref 保存最新的 props，避免 useFrame 闭包过期
+  const useRealtimeTrackingRef = useRef(useRealtimeTracking);
+  const realtimePoseEstimateRef = useRef<PoseEstimate | null>(realtimePoseEstimate);
+
+  // 同步实时追踪相关 props 到 ref，供 useFrame 读取最新值
   useEffect(() => {
-    poseRef.current = pose;
-    vrmPoseRef.current = vrmPose ?? null;
-    smoother.reset();
-  }, [pose, vrmPose, smoother]);
+    useRealtimeTrackingRef.current = useRealtimeTracking;
+    realtimePoseEstimateRef.current = realtimePoseEstimate;
+    // 同步启用状态到 driver
+    const driver = realtimeDriverRef.current;
+    if (driver) {
+      driver.setEnabled(useRealtimeTracking);
+      // 切换时重置解算器状态，避免上次的平滑值残留导致跳变
+      driver.reset();
+    }
+  }, [useRealtimeTracking, realtimePoseEstimate]);
 
   // 异步加载 VRM
   useEffect(() => {
@@ -565,8 +121,7 @@ export function VRMModel({
           if (obj instanceof THREE.Mesh) obj.frustumCulled = false;
         });
 
-        // 摆正朝向（VRM 默认朝 -Z，Three.js 朝 +Z）
-        vrm.scene.rotation.y = Math.PI;
+        // 此 VRM 模型本身面朝 +Z（右臂在 -X，非标准 VRM），已朝向相机，无需旋转
         // VRM hips 通常在 y=0 附近，偏移对齐舞台
         vrm.scene.position.y = -0.9;
 
@@ -574,12 +129,27 @@ export function VRMModel({
           groupRef.current.add(vrm.scene);
         }
 
+        // 将已加载的 VRM 绑定到 VRMAdapter，供 RealtimePoseDriver 使用
+        // VRMAdapter.vrm 是 private 字段，这里通过类型断言设置，避免修改 VRMAdapter 接口
+        // 也避免重复调用 VRMAdapter.load() 导致模型被加载两次
+        (vrmAdapterRef.current as unknown as { vrm: VRM | null }).vrm = vrm;
+
+        // 创建 VRMAnimator 实例（封装 THREE.AnimationMixer）
+        // 与 AvatarDriver 共享同一份实例：AvatarDriver.playClip 触发动画，
+        // VRMModel.useFrame 调用 vrmAnimator.update(delta) 推进
+        vrmAnimatorRef.current = new VRMAnimator(vrm);
+
         setIsLoaded(true);
-        onLoaded?.(vrm);
+        log.info('VRM 加载完成', { hasAnimator: !!vrmAnimatorRef.current });
+
+        // 通知父组件：VRM 和 VRMAnimator 已就绪
+        if (vrmAnimatorRef.current) {
+          onLoaded?.(vrm, vrmAnimatorRef.current);
+        }
       },
       undefined,
       (err) => {
-        console.error('[VRMModel] Failed to load VRM:', err);
+        log.error('Failed to load VRM', err);
       },
     );
 
@@ -589,136 +159,34 @@ export function VRMModel({
           vrmRef.current.scene.parent.remove(vrmRef.current.scene);
         }
         vrmRef.current = null;
+        vrmAnimatorRef.current = null;
       }
     };
   }, [modelUrl, onLoaded]);
 
   // 每帧驱动
-  useFrame((state, delta) => {
+  useFrame((_, delta) => {
     const vrm = vrmRef.current;
     if (!vrm || !isLoaded) return;
 
-    const currentPose = poseRef.current;
-    const currentVRMPose = vrmPoseRef.current;
-    const humanoid = vrm.humanoid;
-    const timestamp = state.clock.elapsedTime * 1000;
-    headAnimTimeRef.current += delta;
-
-    if (currentVRMPose) {
-      // ===== 新 VRMPose 驱动路径（优先）=====
-      // applyVRMPose 内部完成：显式骨骼 rotation + IK 反算 + 手形驱动
-      applyVRMPose(vrm, currentVRMPose, smoother, timestamp);
-    } else {
-      // ===== 旧 BonePose 驱动路径（保留作 fallback）=====
-      // 身体骨骼驱动（含重定向 + 平滑滤波）
-      // 顺序：先下肢→躯干→头→上肢，遵循骨骼层级，避免父级旋转影响子级世界变换计算
-      for (const [internalName, vrmBoneName] of Object.entries(BODY_BONE_MAP)) {
-        const boneNode = humanoid.getRawBoneNode(vrmBoneName as never);
-        if (!boneNode) continue;
-        const poseBone = currentPose[internalName as keyof BonePose] as
-          | { rotation?: { x: number; y: number; z: number } }
-          | undefined;
-        if (!poseBone?.rotation) continue;
-
-        // 1. 重定向：补偿 T-pose（VRM）与 A-pose（内部 IK）的 rest pose 差异
-        //    主要是肩部，T-pose 双臂水平外展，A-pose 双臂下垂
-        const retargeted = retargetRotation(vrmBoneName, poseBone.rotation);
-        // 2. 平滑：One-Euro Filter 抑制帧间抖动
-        const smoothed = smoother.smooth(vrmBoneName, retargeted, timestamp);
-        boneNode.rotation.set(smoothed.x, smoothed.y, smoothed.z);
-      }
-
-      // 手指骨骼驱动（从 HandShape 查表）
-      // 不再引用 BonePose 中不存在的 left_thumb_mcp 等字段
-      driveHandFingers(humanoid, currentPose.left_hand.shape, 'left');
-      driveHandFingers(humanoid, currentPose.right_hand.shape, 'right');
+    // ===== 实时姿态追踪路径（与离线播放互斥）=====
+    // 启用时由 RealtimePoseDriver 接管：KalidokitSolver 解算 → VRMAdapter.applyRealtimePose
+    // driver.update 内部已调用 vrm.update(delta)，因此本帧无需再走离线路径末尾的 vrm.update
+    if (useRealtimeTrackingRef.current) {
+      realtimeDriverRef.current?.update(realtimePoseEstimateRef.current, delta);
+      return;
     }
 
-    // ===== 头部运动叠加 =====
-    // vrmPose 模式下用 VRMPose.bones.head + headMovement；否则用旧 BonePose 字段
-    const headBone = humanoid.getRawBoneNode('head' as never);
-    const neckBone = humanoid.getRawBoneNode('neck' as never);
-    const poseHead = currentVRMPose?.bones.head ?? currentPose.head;
-    const baseRotX = poseHead?.rotation?.x ?? 0;
-    const baseRotY = poseHead?.rotation?.y ?? 0;
-    const baseRotZ = poseHead?.rotation?.z ?? 0;
-
-    let headOffsetX = 0;
-    let headOffsetY = 0;
-    let headOffsetZ = 0;
-    const t = headAnimTimeRef.current;
-
-    switch (currentVRMPose?.headMovement ?? currentPose.head_movement) {
-      case HeadMovement.NOD:
-        headOffsetX = Math.sin(t * Math.PI * 2 * 1.5) * 0.25;
-        break;
-      case HeadMovement.SLIGHT_NOD:
-        headOffsetX = Math.sin(t * Math.PI * 2) * 0.1;
-        break;
-      case HeadMovement.SHAKE:
-        headOffsetY = Math.sin(t * Math.PI * 2 * 2) * 0.35;
-        break;
-      case HeadMovement.TILT_LEFT:
-        headOffsetZ = Math.abs(Math.sin(t * Math.PI)) * 0.2;
-        break;
-      case HeadMovement.TILT_RIGHT:
-        headOffsetZ = -Math.abs(Math.sin(t * Math.PI)) * 0.2;
-        break;
-    }
-
-    if (headBone) {
-      headBone.rotation.x = baseRotX + headOffsetX;
-      headBone.rotation.y = baseRotY + headOffsetY;
-      headBone.rotation.z = baseRotZ + headOffsetZ;
-    }
-    if (neckBone) {
-      neckBone.rotation.x = baseRotX + headOffsetX * 0.4;
-      neckBone.rotation.y = baseRotY + headOffsetY * 0.4;
-      neckBone.rotation.z = baseRotZ + headOffsetZ * 0.4;
-    }
-
-    // ===== 表情驱动 =====
-    const mgr = vrm.expressionManager;
-    if (mgr) {
-      const expr = EXPRESSION_MAP[currentVRMPose?.expression ?? currentPose.expression] ?? 'neutral';
-      const presets = ['happy', 'sad', 'angry', 'surprised', 'fun', 'neutral'];
-      for (const p of presets) {
-        mgr.setValue(p, 0);
-      }
-      if (expr === 'happy') {
-        mgr.setValue('happy', 1);
-        mgr.setValue('fun', 0.4);
-      } else {
-        mgr.setValue(expr, 1);
-      }
-
-      // 自动眨眼
-      blinkTimerRef.current -= delta;
-      if (blinkTimerRef.current <= 0) {
-        blinkTimerRef.current = 3 + Math.random() * 3;
-        isBlinkingRef.current = true;
-      }
-      if (isBlinkingRef.current) {
-        blinkOpenRef.current -= delta * 8;
-        if (blinkOpenRef.current <= 0) {
-          blinkOpenRef.current = 0;
-          isBlinkingRef.current = false;
-        }
-      } else if (blinkOpenRef.current < 1) {
-        blinkOpenRef.current += delta * 6;
-        if (blinkOpenRef.current > 1) blinkOpenRef.current = 1;
-      }
-      mgr.setValue('blinkLeft', 1 - blinkOpenRef.current);
-      mgr.setValue('blinkRight', 1 - blinkOpenRef.current);
-    }
+    // ===== VRM 动画驱动路径 =====
+    // 推进 AnimationMixer（AvatarDriver.playClip 触发的动画在此处推进）
+    vrmAnimatorRef.current?.update(delta);
+    // 更新 spring bone/lookAt/expression（必须在 mixer.update 之后）
+    vrm.update(delta);
 
     // ===== 注视跟踪 =====
     if (lookAtTarget && vrm.lookAt) {
       vrm.lookAt.lookAt(lookAtTarget);
     }
-
-    // VRM 内部更新
-    vrm.update(delta);
   });
 
   return <group ref={groupRef} />;

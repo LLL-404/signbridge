@@ -4,6 +4,9 @@
  */
 
 import type { ClassificationResult } from '@/types/recognition';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('WorkerUtils');
 
 /** 手指状态 */
 export type FingerState = 'extended' | 'folded' | 'half';
@@ -250,7 +253,7 @@ export async function loadGestureLibrary(): Promise<GestureDefinition[]> {
     const lib: GestureLibrary = await res.json();
     gestures = lib.gestures;
   } catch (err) {
-    console.error('[workerUtils] 加载手势库失败:', err);
+    log.error('加载手势库失败', err);
   }
 
   // 用户自定义手势（IndexedDB）

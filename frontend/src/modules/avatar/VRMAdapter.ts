@@ -153,8 +153,7 @@ export class VRMAdapter {
           this.vrm = vrm;
           this.loadingPromise = null;
 
-          // 初始化：摆正朝向
-          vrm.scene.rotation.y = Math.PI;
+          // 初始化：此模型本身面朝 +Z，已朝向相机，无需旋转
 
           resolve(vrm);
         },
@@ -187,12 +186,15 @@ export class VRMAdapter {
    * 应用 AvatarDriver 生成的 BonePose 到 VRM 骨骼
    *
    * 骨骼映射关系：
-   *   - 身体骨骼：通过 humanoid.getRawBoneNode() 获取并旋转
-   *   - 手指骨骼：通过 humanoid.getRawBoneNode() 获取并旋转
+   *   - 身体骨骼：通过 humanoid.getNormalizedBoneNode() 获取并旋转
+   *   - 手指骨骼：通过 humanoid.getNormalizedBoneNode() 获取并旋转
    *   - 表情：通过 expressionManager 设置 blendshape
    *
    * 注意：VRM 的 upperArm/lowerArm 与我们的 elbow/wrist 命名不同，
    *       需要通过 INTERNAL_TO_VRM 映射转换
+   *
+   * 注意：使用标准化姿态 API 后，不再需要 Retargeter.ts 中的 rest pose 差异校正。
+   * 标准化姿态空间已处理 T-pose / A-pose 差异。
    */
   applyPose(pose: BonePose): void {
     const vrm = this.vrm;
@@ -212,7 +214,7 @@ export class VRMAdapter {
         continue;
       }
 
-      const boneNode = humanoid.getRawBoneNode(vrmBoneName);
+      const boneNode = humanoid.getNormalizedBoneNode(vrmBoneName);
       if (!boneNode) continue;
 
       const poseBone = pose[internalName as keyof BonePose] as
@@ -239,7 +241,7 @@ export class VRMAdapter {
         continue;
       }
 
-      const boneNode = humanoid.getRawBoneNode(vrmBoneName);
+      const boneNode = humanoid.getNormalizedBoneNode(vrmBoneName);
       if (!boneNode) continue;
 
       const poseBone = pose[internalName as keyof BonePose] as
@@ -253,6 +255,25 @@ export class VRMAdapter {
 
     // 3. 表情（Blendshape）
     this.applyExpression(pose.expression);
+  }
+
+  /**
+   * 应用实时追踪的姿态数据到 VRM 骨骼
+   * 与 applyPose 的区别：此方法用于实时摄像头追踪数据，
+   * 旋转值已通过 Kalidokit 解算和四元数平滑处理
+   *
+   * @param rotations VRM 骨骼名 → 旋转欧拉角的映射
+   */
+  applyRealtimePose(rotations: Map<string, { x: number; y: number; z: number }>): void {
+    const vrm = this.vrm;
+    if (!vrm) return;
+
+    const humanoid = vrm.humanoid;
+    for (const [boneName, rotation] of rotations) {
+      const boneNode = humanoid.getNormalizedBoneNode(boneName as VRMBoneName);
+      if (!boneNode) continue;
+      boneNode.rotation.set(rotation.x, rotation.y, rotation.z);
+    }
   }
 
   /**
@@ -331,6 +352,7 @@ export class VRMAdapter {
 
   /**
    * 更新 VRM 内部状态（每帧必须调用）
+   * 注意：必须在 applyPose() 之前调用，以确保 spring bone 和 lookAt 先更新
    * @param deltaTime 秒
    */
   update(deltaTime: number): void {

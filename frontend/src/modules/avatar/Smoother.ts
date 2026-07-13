@@ -8,6 +8,7 @@
 //   minCutoff: 最小截止频率（Hz），值越大越平滑
 //   beta: 速度系数，值越大对快速运动响应越好
 //   dCutoff: 速度信号的截止频率（Hz）
+import * as THREE from 'three';
 
 /** 单值 One-Euro Filter */
 export class OneEuroFilter {
@@ -103,7 +104,10 @@ export class Vec3OneEuroFilter {
   }
 }
 
-/** 骨骼旋转平滑器：对每个关节维护独立的 One-Euro Filter */
+/**
+ * 骨骼旋转平滑器：对每个关节维护独立的 One-Euro Filter
+ * @deprecated 使用 QuaternionSmoother 代替
+ */
 export class BoneSmoother {
   private filters: Map<string, Vec3OneEuroFilter> = new Map();
   private minCutoff: number;
@@ -132,7 +136,10 @@ export class BoneSmoother {
   }
 }
 
-/** 球面线性插值（SLERP）两个 Vec3 旋转 */
+/**
+ * 球面线性插值（SLERP）两个 Vec3 旋转
+ * @deprecated 使用 slerpQuat 代替
+ */
 export function slerpRotation(
   a: { x: number; y: number; z: number },
   b: { x: number; y: number; z: number },
@@ -144,4 +151,111 @@ export function slerpRotation(
     y: a.y + (b.y - a.y) * t,
     z: a.z + (b.z - a.z) * t,
   };
+}
+
+/**
+ * 球面线性插值（SLERP）两个四元数
+ * 使用 THREE.Quaternion.slerp 实现，保证旋转插值的稳定性
+ *
+ * @param a 起始四元数
+ * @param b 目标四元数
+ * @param t 插值因子，范围 [0, 1]
+ * @returns 插值后的四元数（新实例）
+ */
+export function slerpQuat(a: THREE.Quaternion, b: THREE.Quaternion, t: number): THREE.Quaternion {
+  // THREE.Quaternion.slerp 是静态方法，返回新四元数，不修改入参
+  return new THREE.Quaternion().slerpQuaternions(a, b, t);
+}
+
+/**
+ * 四元数骨骼旋转平滑器
+ *
+ * 与 BoneSmoother（基于欧拉角分量滤波）不同，本类对四元数的
+ * x/y/z/w 四个分量分别维护独立的 One-Euro Filter，并在每次滤波后
+ * 归一化结果，保证四元数始终是单位四元数。
+ *
+ * 优点：
+ *   - 避免欧拉角的万向锁问题
+ *   - 旋转插值在球面上进行，视觉上更自然
+ *   - 对任意旋转顺序的输入都保持一致性
+ */
+export class QuaternionSmoother {
+  /** 每个骨骼对应的 4 分量滤波器组 */
+  private filters: Map<string, [OneEuroFilter, OneEuroFilter, OneEuroFilter, OneEuroFilter]> = new Map();
+  private minCutoff: number;
+  private beta: number;
+
+  constructor(minCutoff = 1.5, beta = 0.01) {
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+  }
+
+  /** 获取或创建指定骨骼的 4 分量滤波器组 */
+  private getFilters(boneName: string): [OneEuroFilter, OneEuroFilter, OneEuroFilter, OneEuroFilter] {
+    let f = this.filters.get(boneName);
+    if (!f) {
+      // 分别对应四元数的 x、y、z、w 分量
+      f = [
+        new OneEuroFilter(this.minCutoff, this.beta),
+        new OneEuroFilter(this.minCutoff, this.beta),
+        new OneEuroFilter(this.minCutoff, this.beta),
+        new OneEuroFilter(this.minCutoff, this.beta),
+      ];
+      this.filters.set(boneName, f);
+    }
+    return f;
+  }
+
+  /**
+   * 平滑四元数旋转
+   *
+   * @param boneName 骨骼名称
+   * @param quat 输入四元数
+   * @param timestamp 时间戳（毫秒）
+   * @returns 平滑后的四元数（新实例）
+   */
+  smoothQuaternion(boneName: string, quat: THREE.Quaternion, timestamp: number): THREE.Quaternion {
+    const [fx, fy, fz, fw] = this.getFilters(boneName);
+    // 对四元数 4 个分量分别滤波
+    const x = fx.filter(quat.x, timestamp);
+    const y = fy.filter(quat.y, timestamp);
+    const z = fz.filter(quat.z, timestamp);
+    const w = fw.filter(quat.w, timestamp);
+    // 归一化以保证单位四元数（分量独立滤波会破坏模长）
+    const out = new THREE.Quaternion(x, y, z, w);
+    return out.normalize();
+  }
+
+  /**
+   * 平滑欧拉角旋转（内部转换为四元数滤波后返回欧拉角）
+   *
+   * @param boneName 骨骼名称
+   * @param rotation 欧拉角输入（弧度，XYZ 顺序）
+   * @param timestamp 时间戳（毫秒）
+   * @returns 平滑后的欧拉角（弧度，XYZ 顺序）
+   */
+  smooth(
+    boneName: string,
+    rotation: { x: number; y: number; z: number },
+    timestamp: number,
+  ): { x: number; y: number; z: number } {
+    // 欧拉角 -> 四元数（使用 XYZ 顺序，与 Three.js 默认一致）
+    const quat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(rotation.x, rotation.y, rotation.z, 'XYZ'),
+    );
+    const smoothed = this.smoothQuaternion(boneName, quat, timestamp);
+    // 四元数 -> 欧拉角
+    const e = new THREE.Euler().setFromQuaternion(smoothed, 'XYZ');
+    return { x: e.x, y: e.y, z: e.z };
+  }
+
+  /** 重置所有滤波器（在动作切换时调用，避免过渡延迟） */
+  reset(): void {
+    for (const f of this.filters.values()) {
+      f[0].reset();
+      f[1].reset();
+      f[2].reset();
+      f[3].reset();
+    }
+  }
 }

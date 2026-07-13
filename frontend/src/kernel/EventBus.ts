@@ -4,6 +4,9 @@
  */
 
 import type { EventHandler } from './types';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('EventBus');
 
 class EventBus {
   private handlers = new Map<string, Set<EventHandler>>();
@@ -27,7 +30,7 @@ class EventBus {
       try {
         handler(payload);
       } catch (err) {
-        console.error(`[EventBus] 事件 "${event}" 处理器异常:`, err);
+        log.error(`事件 "${event}" 处理器异常`, err);
       }
     });
   }

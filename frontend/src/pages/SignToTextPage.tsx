@@ -25,6 +25,10 @@ import {
 import type { Recognizer } from '@/modules/recognition/Recognizer';
 import type { ClassificationResult, RecognitionStatus } from '@/types/recognition';
 import { PageHeader } from '@/components/common/PageHeader';
+import { logger } from '@/modules/debug/logger';
+import { startupTracker } from '@/modules/debug/StartupTracker';
+
+const log = logger.module('SignToTextPage');
 
 /** 历史记录最大条数 */
 const MAX_HISTORY = 10;
@@ -60,6 +64,8 @@ export function SignToTextPage() {
   // 模型加载状态
   const [modelLoading, setModelLoading] = useState(true);
   const [modelError, setModelError] = useState<string | null>(null);
+  // 当前启动阶段标签（用于 loading 界面展示）
+  const [currentPhaseLabel, setCurrentPhaseLabel] = useState<string | undefined>(undefined);
 
   // 识别状态与结果
   const [status, setStatus] = useState<RecognitionStatus>('idle');
@@ -84,6 +90,13 @@ export function SignToTextPage() {
   const runningRef = useRef(false);
   const historyIdRef = useRef(0);
 
+  // 订阅启动阶段变化，用于 loading 界面显示当前阶段
+  useEffect(() => {
+    return startupTracker.onPhaseChange(() => {
+      setCurrentPhaseLabel(startupTracker.getCurrentPhase()?.label);
+    });
+  }, []);
+
   // 初始化识别器（优先用 Worker，失败降级到主线程）
   useEffect(() => {
     // 初始化连续识别器
@@ -91,6 +104,8 @@ export function SignToTextPage() {
     let cancelled = false;
 
     const initWorker = async () => {
+      // 启动 Worker 识别器初始化计时
+      startupTracker.start('signpage-worker-init', '初始化识别器');
       try {
         const workerRecognizer = new WorkerRecognizer();
         await workerRecognizer.init();
@@ -100,10 +115,15 @@ export function SignToTextPage() {
         }
         workerRecognizerRef.current = workerRecognizer;
         recognizerRef.current = workerRecognizer;
+        // Worker 识别器初始化成功
+        startupTracker.end('signpage-worker-init');
         setModelLoading(false);
         setSupportedGestures(workerRecognizer.getGestures());
       } catch (err) {
-        console.warn('[SignToTextPage] Worker 不可用，降级到主线程:', err);
+        log.warn('Worker 不可用，降级到主线程', err);
+        // Worker 初始化失败，标记失败并启动降级流程计时
+        startupTracker.fail('signpage-worker-init', err);
+        startupTracker.start('signpage-fallback-init', '降级到规则识别');
         // 降级到 RuleRecognizer
         const ruleRecognizer = new RuleRecognizer();
         await ruleRecognizer.init();
@@ -113,6 +133,8 @@ export function SignToTextPage() {
         }
         ruleRecognizerRef.current = ruleRecognizer;
         recognizerRef.current = ruleRecognizer;
+        // 降级识别器初始化成功
+        startupTracker.end('signpage-fallback-init');
         setModelLoading(false);
         setSupportedGestures(ruleRecognizer.getGestures());
       }
@@ -217,7 +239,7 @@ export function SignToTextPage() {
         setDegradedMode(workerRec.isDegraded());
       }
     } catch (err) {
-      console.error('识别失败:', err);
+      log.error('识别失败', err);
     }
 
     if (runningRef.current) {
@@ -283,7 +305,9 @@ export function SignToTextPage() {
     return (
       <div className="flex flex-col items-center justify-center py-20">
         <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-accent-500 border-t-transparent" />
-        <p className="text-lg font-medium text-content-primary">加载预训练模型中...</p>
+        <p className="text-lg font-medium text-content-primary">
+          {currentPhaseLabel ?? '加载预训练模型中...'}
+        </p>
         <p className="mt-2 text-sm text-content-tertiary">首次加载约 2-3 秒</p>
       </div>
     );

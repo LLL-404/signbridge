@@ -1,6 +1,10 @@
 // 虚拟人动作驱动引擎
-// 接收词汇序列（GlossSequence），编排播放：获取/生成动作数据、词汇间过渡、附加非手动标记
-import type { BonePose, Frame, JointPose, MotionData, Vec3, HandPose, SignMotion, Keyframe, VRMPose } from '@/types/avatar';
+// 接收词汇序列（GlossSequence），编排播放：
+//   - 旧 BonePose 轨道（保留，供 2D/skeleton 模式）
+//   - 新 AnimationClip 轨道（VRMAnimator 驱动，3D VRM 模式）
+// 新轨道通过 ClipBuilder 生成 AnimationClip，交由 VRMAnimator 播放，
+// 不再维护 VRMPose 状态与每帧手动设置 node.quaternion。
+import type { BonePose, Frame, JointPose, MotionData, Vec3, HandPose, VRMPose } from '@/types/avatar';
 import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
 import type { GlossSequence, NonManualMark } from '@/types/grammar';
 import {
@@ -14,13 +18,19 @@ import type { HandShapeDefinition, SignGloss } from '@/types/sign';
 import { MotionPlayer } from './MotionPlayer';
 import { TransitionEngine } from './TransitionEngine';
 import { getHandShapeDefinition } from './HandShape';
+import { VRMAnimator } from './VRMAnimator';
+import { ClipBuilder } from './ClipBuilder';
+import type { VRM } from '@pixiv/three-vrm';
 import { vocabularyStore } from '../data/VocabularyStore';
 import { motionDataStore } from '../data/MotionDataStore';
+import { logger } from '@/modules/debug/logger';
 import {
   easeInOutCubic,
   applyIKCorrection,
   clampJointAngles,
 } from './TransitionEngine';
+
+const log = logger.module('AvatarDriver');
 
 /** 身体关节字段列表 */
 const BODY_JOINT_KEYS = [
@@ -105,6 +115,8 @@ function applyMovementOffset(pos: Vec3, movement: string): Vec3 {
     case 'rightward': return { ...pos, x: pos.x + offset };
     case 'toward_body': return { ...pos, z: pos.z - offset };
     case 'away_from_body': return { ...pos, z: pos.z + offset };
+    case 'horizontal_line': return { ...pos, x: pos.x + offset };
+    case 'vertical_line': return { ...pos, y: pos.y + offset };
     default: return { ...pos };
   }
 }
@@ -185,7 +197,7 @@ function lerpBonePose(a: BonePose, b: BonePose, t: number): BonePose {
   return pose as BonePose;
 }
 
-// ===== 基础动作生成 =====
+// ===== 基础动作生成（旧 BonePose 轨道，供 2D/skeleton 模式）=====
 
 /**
  * 根据 SignGloss.manual 参数生成基础动作
@@ -264,12 +276,17 @@ function framesToMotion(frames: Frame[], glossId: string): MotionData {
 
 /**
  * 虚拟人动作驱动引擎
- * 接收词汇序列，编排播放：依次播放每个词汇动作，词汇间使用 TransitionEngine 生成过渡
+ * 接收词汇序列，编排播放：
+ *   - 旧 BonePose 轨道（保留，供 2D/skeleton 模式）
+ *   - 新 AnimationClip 轨道（VRMAnimator 驱动，3D VRM 模式）
+ *
+ * 新架构下 VRM 动画由 ClipBuilder 生成 AnimationClip，VRMAnimator（封装 AnimationMixer）播放。
+ * AvatarDriver 不再维护 VRMPose / vrmQueue / vrmTime 等状态。
  */
 export class AvatarDriver {
   private motionPlayer = new MotionPlayer();
   private transitionEngine = new TransitionEngine();
-  /** 播放队列（motion 与 transition 交替） */
+  /** 播放队列（motion 与 transition 交替，旧 BonePose 轨道） */
   private queue: MotionData[] = [];
   private queueIndex = 0;
   private playing = false;
@@ -278,52 +295,106 @@ export class AvatarDriver {
   private resolvePromise: (() => void) | null = null;
   /** 用户传入的完成回调 */
   private onCompleteCallback: (() => void) | null = null;
-  /** VRM 关键帧动作队列（新骨骼轨道，与旧 MotionData 双轨并行） */
-  private vrmQueue: SignMotion[] = [];
-  private vrmIndex = 0;
-  private vrmTime = 0;
-  private vrmPlaying = false;
+
+  // ===== 新 AnimationClip 轨道相关字段 =====
+  /** VRMAnimator 实例（由 VRMModel 创建并传入） */
+  private vrmAnimator: VRMAnimator | null = null;
+  /** 已加载的 VRM 模型实例 */
+  private vrm: VRM | null = null;
+
+  /**
+   * 注入 VRMAnimator 与 VRM 实例
+   * 由 VRMModel 在 VRM 加载成功后调用，把同一份 VRMAnimator 实例共享给 AvatarDriver，
+   * 让 AvatarDriver 通过 playClip 触发动画，VRMModel 在 useFrame 中调用 vrmAnimator.update(delta)。
+   */
+  setVRMAnimator(vrm: VRM, animator: VRMAnimator): void {
+    this.vrm = vrm;
+    this.vrmAnimator = animator;
+    log.info('已绑定 VRMAnimator', { hasExpressionManager: !!vrm.expressionManager });
+  }
 
   /**
    * 播放词汇序列
-   * 1. 对每个 item 获取/生成动作数据
-   * 2. 词汇间生成过渡动画
-   * 3. 附加非手动标记
+   *
+   * 流程：
+   *   1. 旧 BonePose 轨道：准备 MotionData，构建播放队列（motion + transition 交替）
+   *   2. 新 AnimationClip 轨道：若已绑定 VRMAnimator，对每个词汇调用 ClipBuilder.buildClip
+   *      生成 AnimationClip 并 playClip，同步设置表情，await clip 播放完成
+   *   3. 启动 BonePose 轨道播放（若存在）
    */
   async playSequence(sequence: GlossSequence, onComplete?: () => void): Promise<void> {
-    // 准备所有动作数据
+    this.onCompleteCallback = onComplete ?? null;
+
+    // ===== 1. 旧 BonePose 轨道：准备动作数据 =====
     const motions: MotionData[] = [];
     for (const item of sequence.items) {
       const motion = await this.prepareMotion(item.gloss_id, item.non_manual, sequence.sentence_non_manual);
       if (motion) motions.push(motion);
     }
+    log.info('准备动作', `${motions.length} 个 BonePose 动作`);
 
-    // 构建播放队列：motion + transition 交替
     this.queue = this.buildQueue(motions);
     this.queueIndex = 0;
     this.playing = true;
-    this.onCompleteCallback = onComplete ?? null;
 
-    // 构建 VRM 关键帧队列（新骨骼轨道）
-    this.vrmQueue = [];
-    for (const item of sequence.items) {
-      const vrmMotion = await this.prepareVRMMotion(item.gloss_id, item.non_manual, sequence.sentence_non_manual);
-      if (vrmMotion) this.vrmQueue.push(vrmMotion);
+    // ===== 2. 新 AnimationClip 轨道：依次播放每个词汇的 clip =====
+    if (this.vrmAnimator && this.vrm) {
+      for (const item of sequence.items) {
+        const gloss = await vocabularyStore.getById(item.gloss_id);
+        if (!gloss || !this.vrm) continue;
+
+        const clip = ClipBuilder.buildClip(gloss, this.vrm);
+
+        // 表情处理：AvatarDriver 主动调用 expressionManager，
+        // 不依赖 ClipBuilder 的表情轨道（VRM expressionManager 非 Object3D，
+        // AnimationMixer 可能无法解析 'expressionManager.<preset>' 轨道名）
+        const expression = gloss.non_manual?.expression;
+        const hasExpression = !!(expression && expression !== 'neutral');
+        if (hasExpression) {
+          this.vrm.expressionManager.setValue(expression, 1);
+          this.vrm.expressionManager.update();
+        }
+
+        // 播放 clip（fadeIn 0.3 秒），并等待播放完成
+        this.vrmAnimator.playClip(clip, 0.3);
+        log.info('播放词汇 clip', { glossId: item.gloss_id, duration: clip.duration, expression: hasExpression ? expression : null });
+        await this.waitClipFinish(clip.duration);
+
+        // 重置表情
+        if (hasExpression) {
+          this.vrm.expressionManager.setValue(expression, 0);
+          this.vrm.expressionManager.update();
+        }
+      }
+      // 序列播放完毕，淡出最后一个 action
+      this.vrmAnimator.stop(0.3);
     }
-    this.vrmIndex = 0;
-    this.vrmTime = 0;
-    this.vrmPlaying = this.vrmQueue.length > 0;
-    if (this.vrmPlaying) {
-      this.motionPlayer.playMotion(this.vrmQueue[0]);
+
+    // ===== 3. 启动 BonePose 轨道（若存在）=====
+    if (this.queue.length > 0) {
+      this.playCurrent();
     }
+
+    log.info('开始播放', `队列长度: ${this.queue.length}, 使用 VRMAnimator: ${!!this.vrmAnimator}`);
 
     return new Promise<void>((resolve) => {
       this.resolvePromise = resolve;
-      if (this.queue.length > 0) {
-        this.playCurrent();
-      } else {
+      // 若 BonePose 队列为空，且 VRMAnimator 也未启动或已 await 完成，立即结束
+      if (this.queue.length === 0) {
         this.finish();
       }
+    });
+  }
+
+  /**
+   * 等待 clip 播放完成
+   * 简化实现：setTimeout(durationSec * 1000)
+   * 注意：speed 影响——若 speed != 1，应缩短/延长等待时间
+   */
+  private waitClipFinish(durationSec: number): Promise<void> {
+    const waitMs = (durationSec * 1000) / this.speed;
+    return new Promise((resolve) => {
+      setTimeout(() => resolve(), waitMs);
     });
   }
 
@@ -333,10 +404,8 @@ export class AvatarDriver {
     this.queue = [];
     this.queueIndex = 0;
     this.playing = false;
-    this.vrmQueue = [];
-    this.vrmIndex = 0;
-    this.vrmTime = 0;
-    this.vrmPlaying = false;
+    // 停止 VRMAnimator 当前 action（淡出 0.3 秒）
+    this.vrmAnimator?.stop(0.3);
     this.onCompleteCallback = null;
     const resolve = this.resolvePromise;
     this.resolvePromise = null;
@@ -348,10 +417,13 @@ export class AvatarDriver {
     return this.motionPlayer.getCurrentPose();
   }
 
-  /** 获取当前 VRM 姿态（新骨骼轨道，供 VRM 模型驱动） */
+  /**
+   * 获取当前 VRM 姿态
+   * 兼容性保留：新架构下 VRM 动画由 VRMAnimator 内部 AnimationMixer 直接驱动骨骼，
+   * AvatarDriver 不再维护 VRMPose 状态。此处返回中性姿态。
+   */
   getCurrentVRMPose(): VRMPose {
-    if (!this.vrmPlaying || this.vrmQueue.length === 0) return NEUTRAL_VRM_POSE;
-    return this.motionPlayer.getPoseAt(this.vrmTime);
+    return NEUTRAL_VRM_POSE;
   }
 
   /** 设置播放速度 */
@@ -365,30 +437,21 @@ export class AvatarDriver {
     return this.playing;
   }
 
-  /** 每帧更新（由外部循环调用） */
+  /**
+   * 每帧更新（由外部循环调用）
+   * 只推进旧 BonePose 轨道；VRM 动画由 VRMAnimator.update() 在 VRMModel 的 useFrame 中调用，
+   * AvatarDriver 不再推进 vrmTime。
+   */
   update(deltaTime: number): void {
-    if (!this.playing) return;
-    this.motionPlayer.update(deltaTime);
-    // VRM 关键帧轨道推进
-    if (this.vrmPlaying) {
-      this.vrmTime += deltaTime * this.speed;
-      const current = this.vrmQueue[this.vrmIndex];
-      if (current && this.vrmTime >= current.duration_ms) {
-        this.vrmTime = 0;
-        this.vrmIndex++;
-        if (this.vrmIndex < this.vrmQueue.length) {
-          this.motionPlayer.playMotion(this.vrmQueue[this.vrmIndex]);
-        } else {
-          this.vrmPlaying = false;
-        }
-      }
+    if (this.playing) {
+      this.motionPlayer.update(deltaTime);
     }
   }
 
   // ===== 内部方法 =====
 
   /**
-   * 准备单个词汇的动作数据
+   * 准备单个词汇的动作数据（旧 BonePose 轨道）
    * 优先从 MotionDataStore 获取，不存在则根据 SignGloss 生成基础动作
    * 最后附加非手动标记（item 级优先于句子级）
    */
@@ -406,30 +469,6 @@ export class AvatarDriver {
     // 附加非手动标记：item 级优先，否则用句子级
     const mark = itemNonManual ?? sentenceNonManual;
     return mark ? applyNonManual(motion, mark) : motion;
-  }
-
-  /**
-   * 准备单个词汇的 VRM 关键帧动作（新骨骼轨道）
-   * 始终基于 SignGloss 通过 generateMotion 生成，附加非手动标记到每帧
-   */
-  private async prepareVRMMotion(
-    glossId: string,
-    itemNonManual?: NonManualMark,
-    sentenceNonManual?: NonManualMark,
-  ): Promise<SignMotion | null> {
-    const gloss = await vocabularyStore.getById(glossId);
-    if (!gloss) return null;
-    const motion = generateMotion(gloss);
-    const mark = itemNonManual ?? sentenceNonManual;
-    if (mark) {
-      const expression = parseFacialExpression(mark.expression);
-      const headMovement = parseHeadMovement(mark.head_movement);
-      motion.keyframes = motion.keyframes.map((kf) => ({
-        ...kf,
-        pose: { ...kf.pose, expression, headMovement },
-      }));
-    }
-    return motion;
   }
 
   /**
@@ -467,6 +506,9 @@ export class AvatarDriver {
     if (this.queueIndex < this.queue.length) {
       this.playCurrent();
     } else {
+      // BonePose 轨道完成
+      this.playing = false;
+      // VRM 轨道已在 playSequence 中 await 完成，无需再检查
       this.finish();
     }
   }
@@ -474,7 +516,6 @@ export class AvatarDriver {
   /** 整个序列播放完成 */
   private finish(): void {
     this.playing = false;
-    this.vrmPlaying = false;
     const cb = this.onCompleteCallback;
     this.onCompleteCallback = null;
     const resolve = this.resolvePromise;
@@ -482,184 +523,4 @@ export class AvatarDriver {
     if (cb) cb();
     if (resolve) resolve();
   }
-}
-
-// ===== VRM 关键帧动作生成（静态/直线）=====
-
-/**
- * HandLocation → 手部 IK 目标"相对 hips 的偏移"（单位：米，标准人体比例）
- *
- * 坐标体系（VRM 标准模型本地坐标，+Y 向上，+Z 为前方，+X 为模型右侧）：
- *   - 原点 (0,0,0) = hips 位置
- *   - Y 轴：向上为正，基于成人人体测量学比例（hips 到头顶约 0.80m）
- *       腰 ≈ +0.10, 腹 ≈ +0.20, 胸 ≈ +0.35, 肩峰 ≈ +0.50,
- *       下巴 ≈ +0.55, 嘴 ≈ +0.60, 鼻尖 ≈ +0.63,
- *       眼 ≈ +0.66, 额 ≈ +0.70, 头顶 ≈ +0.80
- *       NEUTRAL 手自然下垂 ≈ -0.10（手腕在大腿旁）
- *   - X 轴：模型右侧为正（左手 = -X，右手 = +X）
- *       肩宽半幅 ≈ ±0.22, 胸宽半幅 ≈ ±0.18, 头宽半幅 ≈ ±0.09
- *   - Z 轴：前方为正，深度按部位前突程度
- *       肩前 ≈ +0.06, 胸前 ≈ +0.16, 腹前(肚) ≈ +0.20,
- *       下巴前 ≈ +0.18, 嘴前 ≈ +0.20, 鼻尖 ≈ +0.22,
- *       眼前 ≈ +0.20, 额前 ≈ +0.16
- *
- * Y 轴缩放策略（applyVRMPose 实现，适配不同头身比）：
- *   - y ≤ 0.50（肩及以下）：按"模型实际肩高 / 标准肩高(0.50)"缩放
- *   - y > 0.50（肩以上）：在 [肩, 头顶] 区间插值，用模型实际头高
- *   这样 Q版大头模型和写实模型的脸部位置都准确
- */
-const VRM_LOCATION_OFFSETS: Record<HandLocation, Vec3> = {
-  [HandLocation.NEUTRAL]:        { x: 0,     y: -0.10, z: 0.10 }, // 手自然下垂（手腕在大腿旁）
-  [HandLocation.WAIST_LEVEL]:    { x: 0,     y: 0.10,  z: 0.12 }, // 腰前
-  [HandLocation.ABDOMEN_LEVEL]:  { x: 0,     y: 0.20,  z: 0.20 }, // 腹前（肚子最前突）
-  [HandLocation.CHEST_CENTER]:   { x: 0,     y: 0.35,  z: 0.16 }, // 胸前
-  [HandLocation.CHEST_LEFT]:     { x: -0.18, y: 0.35,  z: 0.16 },
-  [HandLocation.CHEST_RIGHT]:    { x: 0.18,  y: 0.35,  z: 0.16 },
-  [HandLocation.SHOULDER_LEFT]:  { x: -0.22, y: 0.50,  z: 0.06 }, // 肩前略凸
-  [HandLocation.SHOULDER_RIGHT]: { x: 0.22,  y: 0.50,  z: 0.06 },
-  [HandLocation.CHIN_LEVEL]:     { x: 0,     y: 0.55,  z: 0.18 }, // 下巴前
-  [HandLocation.MOUTH_LEVEL]:    { x: 0,     y: 0.60,  z: 0.20 }, // 嘴前
-  [HandLocation.FACE_LEVEL]:     { x: 0,     y: 0.63,  z: 0.22 }, // 脸中（鼻尖最前突）
-  [HandLocation.EYE_LEVEL]:      { x: 0,     y: 0.66,  z: 0.20 }, // 眼前
-  [HandLocation.FOREHEAD_LEVEL]: { x: 0,     y: 0.70,  z: 0.16 }, // 额前
-};
-
-/**
- * 获取手部 IK 目标"相对 hips 的偏移"
- * NEUTRAL 时按主导手调整 x（手自然下垂在身体一侧）
- */
-function getHandTarget(loc: HandLocation, dominant: 'left' | 'right'): Vec3 {
-  const base = VRM_LOCATION_OFFSETS[loc] ?? VRM_LOCATION_OFFSETS[HandLocation.NEUTRAL];
-  if (loc === HandLocation.NEUTRAL) {
-    return { x: dominant === 'left' ? -0.20 : 0.20, y: base.y, z: base.z };
-  }
-  return { ...base };
-}
-
-/** 根据 movement 构建关键帧的 IK 目标 */
-function buildKeyframePose(
-  handTarget: Vec3,
-  dominant: 'left' | 'right',
-  shape: HandShape,
-  expression?: string,
-  headMovement?: string,
-): VRMPose {
-  const ikKey = dominant === 'left' ? 'leftHand' : 'rightHand';
-  return {
-    ...NEUTRAL_VRM_POSE,
-    ikTargets: { [ikKey]: handTarget } as VRMPose['ikTargets'],
-    handShapes: { [dominant]: shape } as VRMPose['handShapes'],
-    expression: expression as any,
-    headMovement: headMovement as any,
-  };
-}
-
-/**
- * 根据 SignGloss 生成关键帧动作序列
- * 阶段 1：支持静态和直线运动
- */
-export function generateMotion(gloss: SignGloss): SignMotion {
-  const m = gloss.manual;
-  const dominant = m.dominant_hand;
-  const shapeStart = parseHandShape(m.handshape_start);
-  const shapeEnd = parseHandShape(m.handshape_end);
-  const locStart = parseHandLocation(m.location_start);
-  const locEnd = parseHandLocation(m.location_end);
-  const movement = m.movement;
-
-  const startTarget = getHandTarget(locStart, dominant);
-  const endTarget = getHandTarget(locEnd, dominant);
-  const expr = gloss.non_manual?.expression;
-  const head = gloss.non_manual?.head_movement;
-
-  const keyframes: Keyframe[] = [];
-
-  if (movement === Movement.STATIC) {
-    // 静态：2 帧（起手形 @ location）
-    keyframes.push({ time: 0, pose: buildKeyframePose(startTarget, dominant, shapeStart, expr, head) });
-    keyframes.push({ time: 1, pose: buildKeyframePose(startTarget, dominant, shapeEnd, expr, head) });
-  } else if (movement === Movement.UPWARD_ARC || movement === Movement.DOWNWARD_ARC) {
-    // 弧线运动：5 帧，按正弦弧线采样
-    const arcSign = movement === Movement.UPWARD_ARC ? 1 : -1;
-    const arcHeight = 0.15;
-    for (let i = 0; i <= 4; i++) {
-      const t = i / 4;
-      const lerpTarget: Vec3 = {
-        x: startTarget.x + (endTarget.x - startTarget.x) * t,
-        y: startTarget.y + (endTarget.y - startTarget.y) * t,
-        z: startTarget.z + (endTarget.z - startTarget.z) * t,
-      };
-      // 叠加正弦拱形
-      lerpTarget.y += arcSign * Math.sin(t * Math.PI) * arcHeight;
-      const shape = t < 0.5 ? shapeStart : shapeEnd;
-      keyframes.push({ time: t, pose: buildKeyframePose(lerpTarget, dominant, shape, expr, head) });
-    }
-  } else if (movement === Movement.CIRCULAR) {
-    // 圆周运动：5 帧，绕起点画圆
-    const radius = 0.15;
-    for (let i = 0; i <= 4; i++) {
-      const t = i / 4;
-      const angle = t * Math.PI * 2;
-      const target: Vec3 = {
-        x: startTarget.x + Math.cos(angle) * radius,
-        y: startTarget.y + Math.sin(angle) * radius,
-        z: startTarget.z,
-      };
-      const shape = t < 0.5 ? shapeStart : shapeEnd;
-      keyframes.push({ time: t, pose: buildKeyframePose(target, dominant, shape, expr, head) });
-    }
-  } else if (movement === Movement.ZIGZAG) {
-    // 折线抖动：5 帧，正弦抖动
-    const wobble = 0.08;
-    for (let i = 0; i <= 4; i++) {
-      const t = i / 4;
-      const lerpTarget: Vec3 = {
-        x: startTarget.x + (endTarget.x - startTarget.x) * t,
-        y: startTarget.y + (endTarget.y - startTarget.y) * t + Math.sin(t * Math.PI * 4) * wobble,
-        z: startTarget.z + (endTarget.z - startTarget.z) * t,
-      };
-      const shape = t < 0.5 ? shapeStart : shapeEnd;
-      keyframes.push({ time: t, pose: buildKeyframePose(lerpTarget, dominant, shape, expr, head) });
-    }
-  } else {
-    // 直线运动：3 帧（起/中/终）
-    const midTarget: Vec3 = {
-      x: (startTarget.x + endTarget.x) / 2,
-      y: (startTarget.y + endTarget.y) / 2,
-      z: (startTarget.z + endTarget.z) / 2,
-    };
-    keyframes.push({ time: 0, pose: buildKeyframePose(startTarget, dominant, shapeStart, expr, head) });
-    keyframes.push({ time: 0.5, pose: buildKeyframePose(midTarget, dominant, shapeStart, expr, head) });
-    keyframes.push({ time: 1, pose: buildKeyframePose(endTarget, dominant, shapeEnd, expr, head) });
-  }
-
-  // === 双手动作：副手镜像 IK 目标 ===
-  if (m.is_two_handed) {
-    const nonDominant = dominant === 'left' ? 'right' : 'left';
-    const nonDomKey = nonDominant === 'left' ? 'leftHand' : 'rightHand';
-    keyframes.forEach((kf) => {
-      const domKey = dominant === 'left' ? 'leftHand' : 'rightHand';
-      const domTarget = kf.pose.ikTargets?.[domKey];
-      if (domTarget) {
-        kf.pose.ikTargets = {
-          ...kf.pose.ikTargets,
-          [nonDomKey]: { x: -domTarget.x, y: domTarget.y, z: domTarget.z },
-        };
-      }
-      // 副手手形
-      if (kf.pose.handShapes) {
-        kf.pose.handShapes = {
-          ...kf.pose.handShapes,
-          [nonDominant]: kf.pose.handShapes[dominant],
-        };
-      }
-    });
-  }
-
-  return {
-    gloss_id: gloss.gloss_id,
-    keyframes,
-    duration_ms: gloss.duration_ms > 0 ? gloss.duration_ms : DEFAULT_DURATION_MS,
-    loop: false,
-  };
 }

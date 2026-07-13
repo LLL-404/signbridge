@@ -28,6 +28,9 @@ import type { Recognizer, FrameInput } from './Recognizer';
 import type { GestureDefinition } from './WorkerUtils';
 import { extractFeatures, matchRule } from './WorkerUtils';
 import { appConfig } from '@/config';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('RuleRecognizer');
 
 // 重新导出，保持外部 import 路径兼容
 export type { GestureDefinition };
@@ -63,7 +66,7 @@ export class RuleRecognizer implements Recognizer {
       const lib: GestureLibrary = await res.json();
       this.gestures = lib.gestures;
     } catch (err) {
-      console.error('[RuleRecognizer] 加载手势库失败:', err);
+      log.error('加载手势库失败', err);
       this.gestures = [];
     }
 

@@ -1,10 +1,12 @@
 // 双向对话页面：左侧健听人（语音→手语），右侧听障人（手语→文字）
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { VRM } from '@pixiv/three-vrm';
 import { VoiceInput } from '@/components/voice/VoiceInput';
 import { SignCamera } from '@/components/sign/SignCamera';
 import AvatarCanvas from '@/components/avatar/AvatarCanvas';
 import { grammarEngine } from '@/modules/grammar/GrammarEngine';
 import { AvatarDriver } from '@/modules/avatar/AvatarDriver';
+import type { VRMAnimator } from '@/modules/avatar/VRMAnimator';
 import { KeypointExtractor } from '@/modules/recognition/KeypointExtractor';
 import { SequenceClassifier } from '@/modules/recognition/SequenceClassifier';
 import { ConfidenceFilter } from '@/modules/recognition/ConfidenceFilter';
@@ -12,6 +14,10 @@ import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
 import type { BonePose, VRMPose } from '@/types/avatar';
 import type { FrameKeypoints, KeypointSequence, RecognitionStatus } from '@/types/recognition';
 import { PageHeader } from '@/components/common/PageHeader';
+import { logger } from '@/modules/debug/logger';
+import { startupTracker } from '@/modules/debug/StartupTracker';
+
+const log = logger.module('DialoguePage');
 
 /** 消息来源 */
 type Sender = 'hearing' | 'deaf';
@@ -94,18 +100,33 @@ export function DialoguePage() {
       void (async () => {
         try {
           const sequence = await grammarEngine.convert(text);
+          // 有未匹配词时追加一条系统提示消息
+          if (sequence.unmatched_words && sequence.unmatched_words.length > 0) {
+            appendMessage({
+              sender: 'hearing',
+              type: 'voice',
+              text: `（未识别：${sequence.unmatched_words.join('、')}）`,
+            });
+          }
+          if (sequence.items.length === 0) return;
           if (isPlayingRef.current) {
             queueRef.current.push(sequence);
           } else {
             playNextRef.current(sequence);
           }
         } catch (err) {
-          console.error('语法转换失败:', err);
+          log.error('语法转换失败', err);
         }
       })();
     },
     [appendMessage],
   );
+
+  // ===== VRM 加载完成回调：把 VRM 和 VRMAnimator 注入 AvatarDriver =====
+  const handleVRMLoaded = useCallback((vrm: VRM, animator: VRMAnimator) => {
+    avatarDriverRef.current?.setVRMAnimator(vrm, animator);
+    log.info('VRM 已加载并绑定到 AvatarDriver');
+  }, []);
 
   // 动画循环
   useEffect(() => {
@@ -153,12 +174,22 @@ export function DialoguePage() {
     classifierRef.current = new SequenceClassifier();
     filterRef.current = new ConfidenceFilter();
     let cancelled = false;
+    // 启动对话模型加载计时
+    startupTracker.start('dialogue-model-load', '加载对话模型');
     classifierRef.current
       .init()
-      .then(() => { if (!cancelled) setModelLoading(false); })
+      .then(() => {
+        if (!cancelled) {
+          // 模型加载完成
+          startupTracker.end('dialogue-model-load');
+          setModelLoading(false);
+        }
+      })
       .catch((err) => {
         if (!cancelled) {
-          console.error('模型加载失败:', err);
+          // 模型加载失败
+          startupTracker.fail('dialogue-model-load', err);
+          log.error('模型加载失败', err);
           setModelLoading(false);
         }
       });
@@ -198,7 +229,7 @@ export function DialoguePage() {
           updateStatus('uncertain');
         }
       } catch (err) {
-        console.error('识别失败:', err);
+        log.error('识别失败', err);
         updateStatus('uncertain');
       }
     },
@@ -297,7 +328,7 @@ export function DialoguePage() {
           <VoiceInput onText={handleVoiceText} placeholder="点击麦克风说话，将转为手语" />
           <div className="flex items-start justify-center">
             <div className="aspect-[6/7] w-full max-w-[360px]">
-              <AvatarCanvas pose={currentPose} vrmPose={currentVRMPose} width="100%" height="100%" />
+              <AvatarCanvas pose={currentPose} vrmPose={currentVRMPose} width="100%" height="100%" onVRMLoaded={handleVRMLoaded} />
             </div>
           </div>
         </div>

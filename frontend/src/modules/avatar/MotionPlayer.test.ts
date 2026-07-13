@@ -234,14 +234,14 @@ describe('MotionPlayer 关键帧模式', () => {
       duration_ms: 1000,
       loop: false,
       keyframes: [
-        { time: 0, pose: { ikTargets: { rightHand: { x: 0, y: 1, z: 0 } } } as VRMPose },
-        { time: 1, pose: { ikTargets: { rightHand: { x: 1, y: 1, z: 0 } } } as VRMPose },
+        { time: 0, pose: { bones: { rightUpperArm: { rotation: { x: 0, y: 1, z: 0 } } } } as VRMPose },
+        { time: 1, pose: { bones: { rightUpperArm: { rotation: { x: 1, y: 1, z: 0 } } } } as VRMPose },
       ],
     };
     const player = new MotionPlayer();
     player.playMotion(motion);
     const pose = player.getPoseAt(500);  // 中点
-    expect(pose.ikTargets?.rightHand?.x).toBeCloseTo(0.5);
+    expect(pose.bones.rightUpperArm?.rotation.x).toBeCloseTo(0.5);
   });
 
   it('超出时长应返回最后一帧', () => {
@@ -250,13 +250,13 @@ describe('MotionPlayer 关键帧模式', () => {
       duration_ms: 1000,
       loop: false,
       keyframes: [
-        { time: 0, pose: { ikTargets: { rightHand: { x: 0, y: 1, z: 0 } } } as VRMPose },
-        { time: 1, pose: { ikTargets: { rightHand: { x: 1, y: 1, z: 0 } } } as VRMPose },
+        { time: 0, pose: { bones: { rightUpperArm: { rotation: { x: 0, y: 1, z: 0 } } } } as VRMPose },
+        { time: 1, pose: { bones: { rightUpperArm: { rotation: { x: 1, y: 1, z: 0 } } } } as VRMPose },
       ],
     };
     const player = new MotionPlayer();
     player.playMotion(motion);
     const pose = player.getPoseAt(2000);
-    expect(pose.ikTargets?.rightHand?.x).toBeCloseTo(1);
+    expect(pose.bones.rightUpperArm?.rotation.x).toBeCloseTo(1);
   });
 });
