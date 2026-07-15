@@ -41,8 +41,8 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'sans-serif'],
-        mono: ['"JetBrains Mono"', '"SF Mono"', 'monospace'],
+        sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', '"PingFang SC"', '"Microsoft YaHei"', 'sans-serif'],
+        mono: ['"SF Mono"', '"Consolas"', 'monospace'],
       },
       boxShadow: {
         soft: '0 2px 8px -2px rgba(0, 0, 0, 0.3)',

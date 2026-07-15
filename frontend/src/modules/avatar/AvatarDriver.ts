@@ -10,9 +10,6 @@ import type { GlossSequence, NonManualMark } from '@/types/grammar';
 import {
   HandShape,
   HandLocation,
-  FacialExpression,
-  HeadMovement,
-  Movement,
 } from '@/types/sign';
 import type { HandShapeDefinition, SignGloss } from '@/types/sign';
 import { MotionPlayer } from './MotionPlayer';
@@ -20,6 +17,8 @@ import { TransitionEngine } from './TransitionEngine';
 import { getHandShapeDefinition } from './HandShape';
 import { VRMAnimator } from './VRMAnimator';
 import { ClipBuilder } from './ClipBuilder';
+import { retarget as retargetMixamoClip } from './MixamoRetargeter';
+import { parseHandShape, parseHandLocation, parseFacialExpression, parseHeadMovement } from './EnumParser';
 import type { VRM } from '@pixiv/three-vrm';
 import { vocabularyStore } from '../data/VocabularyStore';
 import { motionDataStore } from '../data/MotionDataStore';
@@ -68,32 +67,6 @@ const DEFAULT_DURATION_MS = 1000;
 /** 帧间隔（毫秒） */
 const FRAME_INTERVAL_MS = 16;
 
-// ===== 枚举解析 =====
-
-/** 将字符串安全转换为 HandShape 枚举，无法识别时返回 OPEN_5 */
-function parseHandShape(s: string): HandShape {
-  const values = Object.values(HandShape);
-  return (values as string[]).includes(s) ? (s as HandShape) : HandShape.OPEN_5;
-}
-
-/** 将字符串安全转换为 HandLocation 枚举，无法识别时返回 NEUTRAL */
-function parseHandLocation(s: string): HandLocation {
-  const values = Object.values(HandLocation);
-  return (values as string[]).includes(s) ? (s as HandLocation) : HandLocation.NEUTRAL;
-}
-
-/** 将字符串安全转换为 FacialExpression 枚举 */
-function parseFacialExpression(s: string): FacialExpression {
-  const values = Object.values(FacialExpression);
-  return (values as string[]).includes(s) ? (s as FacialExpression) : FacialExpression.NEUTRAL;
-}
-
-/** 将字符串安全转换为 HeadMovement 枚举 */
-function parseHeadMovement(s: string): HeadMovement {
-  const values = Object.values(HeadMovement);
-  return (values as string[]).includes(s) ? (s as HeadMovement) : HeadMovement.NONE;
-}
-
 // ===== 位置与姿态构建 =====
 
 /** 获取指定位置对应的 3D 坐标，NEUTRAL 时根据主导手调整 x 符号 */
@@ -105,7 +78,11 @@ function getLocationPosition(location: HandLocation, dominantHand: 'left' | 'rig
   return { ...base };
 }
 
-/** 根据 movement 方向对位置施加偏移（用于起止位置相同时的运动） */
+/**
+ * 根据 movement 方向对位置施加偏移（用于 2D/skeleton 模式下起止位置相同时的运动）
+ * 注意：3D VRM 模式使用 ClipBuilder.buildMovementTrajectory 处理全部 19 种 Movement 枚举，
+ * 本函数仅服务于旧 BonePose 管道的简化位置偏移，不需要完整轨迹支持。
+ */
 function applyMovementOffset(pos: Vec3, movement: string): Vec3 {
   const offset = 0.2;
   switch (movement) {
@@ -314,6 +291,59 @@ export class AvatarDriver {
   }
 
   /**
+   * 加载 Mixamo FBX 动画并重定向后播放
+   *
+   * 流程：
+   *   1. 动态 import FBXLoader，加载远程 FBX
+   *   2. 取 asset.animations[0] 作为 fbxClip
+   *   3. 调用 MixamoRetargeter.retarget 重映射轨道到 VRM normalized bone
+   *   4. 通过 VRMAnimator.playClip 播放，await clip 时长后触发 onComplete
+   *
+   * 失败处理：try/catch 捕获异常，log.error 输出失败信息，不向上抛出
+   *
+   * @param url FBX 文件 URL（如 '/animations/hello.fbx'）
+   * @param onComplete 播放完成回调（可选）
+   */
+  async playRetargetedAnimation(url: string, onComplete?: () => void): Promise<void> {
+    if (!this.vrm || !this.vrmAnimator) {
+      log.error('playRetargetedAnimation 失败：VRM 未绑定', { url });
+      onComplete?.();
+      return;
+    }
+
+    try {
+      // 动态加载 FBXLoader，避免首屏包体积增加
+      const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js');
+      const loader = new FBXLoader();
+      const asset = await loader.loadAsync(url);
+
+      const fbxClip = asset.animations[0];
+      if (!fbxClip) {
+        log.error('FBX 文件未包含动画', { url });
+        onComplete?.();
+        return;
+      }
+
+      // 重定向到 VRM normalized bone
+      const retargetedClip = retargetMixamoClip(fbxClip, this.vrm);
+      this.vrmAnimator.playClip(retargetedClip, 0.3);
+      log.info('播放 Mixamo 重定向动画', { url, duration: retargetedClip.duration });
+
+      // 穿模检测说明：重定向动画无轨迹点（不同于 ClipBuilder.buildArmTracks 生成的轨道），
+      // 无法用同样方法做静态穿模检测，需运行时每帧检测手腕位置是否穿入躯干。
+      // 此处仅输出占位日志，实际每帧检测在 AvatarDriver.update 中需新增 hook（暂未实现）。
+      log.info('[穿模统计] Mixamo重定向动画 | 轨迹点=N/A | 需运行时每帧检测');
+
+      // 等待 clip 播放完成后触发 onComplete
+      await this.waitClipFinish(retargetedClip.duration);
+      onComplete?.();
+    } catch (err) {
+      log.error('playRetargetedAnimation 失败', { url, err });
+      onComplete?.();
+    }
+  }
+
+  /**
    * 播放词汇序列
    *
    * 流程：
@@ -345,26 +375,12 @@ export class AvatarDriver {
 
         const clip = ClipBuilder.buildClip(gloss, this.vrm);
 
-        // 表情处理：AvatarDriver 主动调用 expressionManager，
-        // 不依赖 ClipBuilder 的表情轨道（VRM expressionManager 非 Object3D，
-        // AnimationMixer 可能无法解析 'expressionManager.<preset>' 轨道名）
-        const expression = gloss.non_manual?.expression;
-        const hasExpression = !!(expression && expression !== 'neutral');
-        if (hasExpression) {
-          this.vrm.expressionManager.setValue(expression, 1);
-          this.vrm.expressionManager.update();
-        }
-
-        // 播放 clip（fadeIn 0.3 秒），并等待播放完成
+        // 表情由 ClipBuilder.buildExpressionTrack 生成的轨道驱动，
+        // 通过 VRMAnimator 构造函数中创建的 'expressionManager' 代理 Object3D
+        // 转发到 vrm.expressionManager，无需在此手动调用 setValue
         this.vrmAnimator.playClip(clip, 0.3);
-        log.info('播放词汇 clip', { glossId: item.gloss_id, duration: clip.duration, expression: hasExpression ? expression : null });
+        log.info('播放词汇 clip', { glossId: item.gloss_id, duration: clip.duration });
         await this.waitClipFinish(clip.duration);
-
-        // 重置表情
-        if (hasExpression) {
-          this.vrm.expressionManager.setValue(expression, 0);
-          this.vrm.expressionManager.update();
-        }
       }
       // 序列播放完毕，淡出最后一个 action
       this.vrmAnimator.stop(0.3);

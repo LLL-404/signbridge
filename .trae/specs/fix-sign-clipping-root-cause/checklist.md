@@ -1,0 +1,11 @@
+- [x] `solveArmQuaternions` 添加诊断日志，输出 `upperRestDir`/`lowerRestDir`/`hingeAxis`/`elbowDir`/`upperArmDir`/`forearmLocalDir`/`signedAngle` 等中间值
+- [x] `buildArmTracks` 添加诊断日志，输出 `upperRestDir`/`lowerRestDir`/`shoulderSceneLocal`/`startTarget`/`endTarget`（每 clip 一次）
+- [x] `computeHingeAxis` 检测叉积退化（`lengthSq < 1e-6`），回退到正交参考方向
+- [x] `computeHingeAxis` 在 T-pose 模型（`upperRestDir = (±1,0,0)`）下行为与现有实现一致
+- [x] `computeHingeAxis` 在 A-pose 模型（`upperRestDir = (0,-1,0)`）下返回非零铰链轴
+- [x] `solveArmQuaternions` 中 `sideBias` 从 `upperRestDir.x` 动态推导，不再硬编码
+- [x] `reference` 向量在 T-pose 右臂（`upperRestDir = (-1,0,0)`）下肘部向 -X 侧偏
+- [x] `reference` 向量在 A-pose 右臂（`upperRestDir = (0,-1,0)`）下不依赖 X 方向
+- [x] VS Code 诊断无新增 error/warning
+- [~] 输入"你好"后右臂动作不穿模（需用户运行时验证）
+- [~] 诊断日志确认 `hingeAxis` 非零、`signedAngle` 在 [0°, 150°] 范围内（代码逻辑分析确认，待运行时验证）

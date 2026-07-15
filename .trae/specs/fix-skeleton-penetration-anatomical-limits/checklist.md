@@ -1,0 +1,21 @@
+# Checklist
+
+- [x] BodyVolume.ts 新增，躯干胶囊/头部球/手臂胶囊均从 VRM 实际骨骼位置推导，无硬编码尺寸
+- [x] buildBodyVolume(vrm) 正确构建包络，不同模型自动适配
+- [x] isInsideTorso / isInsideHead 穿透检测正确（点 vs 胶囊/球算法）
+- [x] projectToSurface 沿最近外法线投影，保留切向分量
+- [x] buildArmTracks 在 IK 解算前对每个轨迹点做合法性约束，穿入点被投影到表面
+- [x] solveArmQuaternions 后肘部位置穿透检测，穿入则推到表面并重算前臂方向
+- [x] 肘引导方向从硬编码改为基于 shoulder→hips 动态推导，A-pose 适配
+- [x] JointLimits 新增肩关节分方向限制（外展120°/前屈180°/后伸60°）
+- [x] JointLimits 新增肘关节旋前旋后限制（±80°）
+- [x] ClipBuilder 调用新关节限制函数替换原单一角度钳制
+- [x] 关节限制值附人体测量学数据来源注释
+- [x] tsc --noEmit 通过，0 error
+- [x] eslint 通过，0 error/warning
+- [x] 运行时验证「你好」：数据级日志确认躯干穿入=0、头部穿入=0、肘部穿入=0（gloss_001, right, 5 轨迹点）
+- [x] 运行时验证「朋友」：数据级日志确认双手（right+left）穿入均为 0
+- [x] 运行时验证「吃饭」：数据级日志确认躯干穿入=0、头部穿入=0、肘部穿入=0（gloss_571, right, 6 轨迹点）
+- [x] 运行时验证「过来」：数据级日志确认躯干穿入=0、头部穿入=0、肘部穿入=0（gloss_570, right, 5 轨迹点）
+- [x] 诊断日志确认肘部位置不再位于躯干胶囊内（4 词条肘部穿入均为 0）
+- [x] CHANGELOG.md [Unreleased] 已记录 BodyVolume 与穿模修复

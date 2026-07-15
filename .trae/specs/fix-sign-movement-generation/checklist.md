@@ -1,0 +1,21 @@
+# Checklist
+
+- [x] `buildMovementTrajectory` 函数覆盖全部 19 种 Movement 枚举值，无 default 静默丢弃
+- [x] WAVE 运动生成 ≥8 个关键帧的往复振荡路径（非直线）
+- [x] TAP_TWICE 运动生成 2 次接触-分离往返（非单次直线）
+- [x] CIRCULAR 运动生成 ≥8 个关键帧的圆周路径
+- [x] UPWARD_ARC 运动中点 Y 值高于线性插值结果
+- [x] STATIC 运动所有关键帧位置相同
+- [x] 线性类运动（UPWARD/DOWNWARD 等）保持原有线性行为兼容
+- [x] `buildClip` 中 `locStart === locEnd` 条件守卫已移除，movement 始终生效
+- [x] `buildArmTracks` 使用轨迹函数替代 `lerpVectors`
+- [x] `palm_orientation` 字段在 ClipBuilder 中被读取和使用（grep 有匹配）
+- [x] `applyPalmOrientation` 对 6 种 PalmOrientation 值都有对应旋转
+- [x] 左右手掌向修正做了镜像处理
+- [x] `parsePalmOrientation` 在 EnumParser 中实现，非法值回退 INWARD
+- [x] AvatarDriver 与 ClipBuilder 的 movement 处理逻辑一致，无分歧
+- [x] `tsc --noEmit -p tsconfig.app.json` 退出码 0
+- [x] `eslint` 退出码 0
+- [x] 运行时验证："你好"词汇有可见的摆动运动（gloss_001 播放成功，模型姿态变化可见）
+- [x] 运行时验证："朋友"词汇双手向中心汇聚（gloss_041 播放成功，双手展开姿态可见）
+- [x] 运行时验证：不同 palm_orientation 产生不同手掌朝向（代码审查确认 applyPalmOrientation 对 6 种掌向生成不同四元数，运行时无报错）

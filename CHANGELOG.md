@@ -9,6 +9,9 @@
 ## [Unreleased]
 
 ### ✨ 新增
+- feat(grammar): 时态助词"了/着/过"分词识别与非手语标记——Tokenizer PARTICLES 词表增加时态助词，NonManualMarker 新增完成体（了→slight_nod）/持续体（着）/经历体（过→shake）检测，优先级：疑问>否定>强调>时态>陈述；6 个演示句子（我今天吃饭了/你好朋友/谢谢老师/我想喝水/他明天来/我们是学生）端到端验证全部通过
+- feat(data): 扩充餐饮/趋向类高频词条 7 个（过来/吃饭/饭/喝/菜/饱/渴），词汇库覆盖基本餐饮场景，修复「过来吃饭」等日常短语识别失败
+- feat(avatar): 新增 BodyVolume 身体包络体模块（躯干胶囊/头部球/手臂胶囊），从 VRM normalized bone 实际位置推导包络参数，支持穿透检测与表面投影，不同模型自动适配
 - feat(avatar): 新增 ClipBuilder 关键帧构建器
 - feat(avatar): 新增 JointLimits 关节限制系统
 - feat(avatar): 新增 KalidokitSolver 姿态求解器
@@ -19,10 +22,29 @@
 - feat(recognition): 新增 pose.worker 姿态检测 Worker
 - feat(hooks): 新增 usePoseTracking 姿态跟踪 Hook
 - feat: 新增 docs/ 目录整理项目文档
+- feat(data): 扩充内置词汇库至 94 个词汇，覆盖 12 个类别（日常问候、代词、形容词、动词、疑问词、否定词、名词、情感、时间、数字、颜色、专有名词）
+- feat(data): 新增 SignLanguageRules.ts 手语动作规律规则，包含手形/位置/运动/表情 4 张语义映射表和 6 类参数组合模板
+- feat(data): 新增 validateVocabulary.ts 词汇数据校验工具，开发环境启动时自动校验枚举合法性
+- feat(types): HandShape 枚举新增 HOOK 手形，Movement 新增 7 个运动值，HeadMovement 新增 TILT/SLIGHT_BOW
+
+### 🔧 修复
+- fix(grammar): 时态助词"了/着/过"不再作为未匹配词——GlossMapper 对 pos='u' 的 token 静默跳过（其语义由 NonManualMarker 承载），PosTagger 将 PARTICLES 检查提前到 VERBS 之前使"了/着/过"标注为助词而非动词
+- fix(avatar): 修复手臂穿模——ClipBuilder.buildArmTracks 在 IK 解算前对轨迹点做 BodyVolume 合法性约束（手腕目标穿入躯干/头部时投影到表面），solveArmQuaternions 后检测肘部穿透并沿外法线推出，肘引导方向从硬编码改为基于 shoulder→hips 动态推导适配 A-pose；JointLimits 升级为解剖学方向限制（肩外展≤120°/前屈≤180°/后伸≤60°，肘旋前旋后≤±80°）；数据级验证 4 词条（你好/朋友/吃饭/过来）穿入数均为 0
+- fix(grammar): 分词器 VERBS 补全「过」、新增 NOUNS 名词词表与 PosTagger 名词分支，修复「过来吃饭」等日常短语切分后「过」「饭」无法映射 gloss_id 致语义残缺的问题
+- fix(avatar): 重构 ClipBuilder 动作生成系统——新增 buildMovementTrajectory 支持 19 种运动轨迹（弧线/圆周/折线/波浪/叩击/钩合等），新增 applyPalmOrientation 手掌朝向校正，修复 7 个新增 Movement 值落入 default 分支产生零动作、palm_orientation 字段被完全忽略的问题
+- fix(avatar): VRMModel 新增模块级 loadVRMCached 缓存加载 Promise，修复 React StrictMode 双重渲染导致 VRM 模型加载 ERR_ABORTED 错误
+- fix(ui): 移除 Google Fonts 引用改用系统字体栈（global.css/tailwind.config.js），并同步更新 index.html CSP，修复 fonts.googleapis.com 加载失败（ERR_ABORTED）错误
+- fix(data): 规范化 24 个现有词汇的字段值，统一使用合法枚举值（handshape/movement/location/expression/palm_orientation）
+- fix(avatar): 修复 NonManualMarkerOverlay 缺少 TILT/SLIGHT_BOW 枚举处理导致的类型错误
+- fix(avatar): 移除 AvatarDriver 未使用的 Movement 导入
+- fix(avatar): 移除 ClipBuilder 未使用的 getBoneLength 函数
+- fix(avatar): 放宽 Skeleton3D 的 FINGER_LENGTHS 类型为 number[] 修复元组类型不匹配
 
 ### 📦 维护
 - chore: 迁移文档到 docs/ 目录
 - chore: 清理测试文件和临时资源
+- chore(ci): 升级 GitHub Actions Node.js 版本从 20 到 24，修复部署失败
+- chore: 重新生成 package-lock.json 修复依赖不同步
 
 ---
 

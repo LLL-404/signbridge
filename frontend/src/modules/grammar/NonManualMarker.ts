@@ -6,7 +6,14 @@ import { FacialExpression, HeadMovement } from '@/types/sign';
 import { Rewriter } from './Rewriter';
 
 /** 句子类型 */
-export type SentenceType = 'question' | 'negation' | 'emphasis' | 'statement';
+export type SentenceType =
+  | 'question'
+  | 'negation'
+  | 'emphasis'
+  | 'completion'
+  | 'continuous'
+  | 'experience'
+  | 'statement';
 
 /**
  * 非手动标记器
@@ -33,6 +40,23 @@ export class NonManualMarker {
       trigger: 'emphasis',
       expression: FacialExpression.EMPHASIS,
       head_movement: HeadMovement.NONE,
+    },
+    {
+      trigger: 'completion',
+      // FacialExpression 无 RELAXED，用 NEUTRAL 代替
+      expression: FacialExpression.NEUTRAL,
+      head_movement: HeadMovement.SLIGHT_NOD,
+    },
+    {
+      trigger: 'continuous',
+      expression: FacialExpression.NEUTRAL,
+      head_movement: HeadMovement.NONE,
+    },
+    {
+      trigger: 'experience',
+      expression: FacialExpression.NEUTRAL,
+      // HeadMovement 无 SLIGHT_SHAKE，用 SHAKE 近似
+      head_movement: HeadMovement.SHAKE,
     },
   ];
 
@@ -73,7 +97,7 @@ export class NonManualMarker {
 
   /**
    * 检测句子类型
-   * 优先级：疑问 > 否定 > 强调 > 陈述
+   * 优先级：疑问 > 否定 > 强调 > 时态/体 > 陈述
    */
   private detectSentenceType(tokens: Token[]): SentenceType {
     // 检测疑问句：含疑问词或疑问语气词
@@ -93,6 +117,14 @@ export class NonManualMarker {
       (t) => t.pos === 'emph' || Rewriter.isEmphasisWord(t.word),
     );
     if (hasEmphasis) return 'emphasis';
+
+    // 检测时态/体：句末助词"了/着/过"
+    const lastToken = tokens[tokens.length - 1];
+    if (lastToken) {
+      if (lastToken.word === '了' && lastToken.pos === 'u') return 'completion';
+      if (lastToken.word === '着' && lastToken.pos === 'u') return 'continuous';
+      if (lastToken.word === '过' && lastToken.pos === 'u') return 'experience';
+    }
 
     // 默认陈述句
     return 'statement';

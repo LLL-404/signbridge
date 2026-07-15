@@ -14,6 +14,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '@/App';
 import '@/styles/global.css';
+import { runVocabularyValidationOnStartup } from '@/modules/data/validateVocabulary';
+
+// 开发环境启动时校验词汇数据
+runVocabularyValidationOnStartup();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

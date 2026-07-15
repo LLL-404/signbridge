@@ -10,7 +10,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { solve, solveLeg } from './IKSolver';
+import * as THREE from 'three';
+import type { Vec3 } from '@/types/avatar';
+import { solve, solveLeg, solveFABRIK, solveFABRIKMultiChain, type ArmIKTarget } from './IKSolver';
 
 describe('IKSolver', () => {
   it('目标在臂长范围内应返回有效解', () => {
@@ -154,5 +156,118 @@ describe('solveSpine (躯干弯曲)', () => {
     const result = solveSpine('forward', 0);
     expect(result.spine.x).toBe(0);
     expect(result.chest.x).toBe(0);
+  });
+});
+
+// ===== FABRIK IK 测试 =====
+
+/**
+ * FK 辅助：根据 IKResult 重建腕部世界位置，用于验证 IK 精度
+ * 约定与 Skeleton3D 一致：骨骼 rest 方向为 -Y，父子层级 worldRot = parentRot * localRot
+ */
+function fkWristPos(
+  result: { shoulderRotation: Vec3; elbowRotation: Vec3 },
+  shoulderPos: Vec3,
+  L1: number,
+  L2: number,
+): THREE.Vector3 {
+  const shoulderQuat = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(result.shoulderRotation.x, result.shoulderRotation.y, result.shoulderRotation.z, 'XYZ'),
+  );
+  const elbowQuat = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(result.elbowRotation.x, result.elbowRotation.y, result.elbowRotation.z, 'XYZ'),
+  );
+  // 上臂方向 = rest(-Y) 应用肩旋转
+  const upperArmDir = new THREE.Vector3(0, -1, 0).applyQuaternion(shoulderQuat);
+  const elbowPos = new THREE.Vector3(shoulderPos.x, shoulderPos.y, shoulderPos.z)
+    .addScaledVector(upperArmDir, L1);
+  // 前臂方向 = rest(-Y) 先经肘本地旋转，再经肩旋转（父子层级）
+  const forearmDir = new THREE.Vector3(0, -1, 0)
+    .applyQuaternion(elbowQuat)
+    .applyQuaternion(shoulderQuat);
+  return elbowPos.addScaledVector(forearmDir, L2);
+}
+
+describe('solveFABRIK', () => {
+  it('可达目标应精确收敛（FK 重建误差 ≤ 1e-3）', () => {
+    const shoulder = { x: 0, y: 0.5, z: 0 };
+    const target = { x: 0.3, y: 0.5, z: 0 };
+    const L1 = 0.28, L2 = 0.26;
+    const result = solveFABRIK(shoulder, target, L1, L2, 'left', undefined, 10);
+    const wrist = fkWristPos(result, shoulder, L1, L2);
+    const err = wrist.distanceTo(new THREE.Vector3(target.x, target.y, target.z));
+    expect(err).toBeLessThanOrEqual(1e-3);
+  });
+
+  it('不可达目标应 fallback 到解析法（不报错）', () => {
+    const shoulder = { x: 0, y: 0.5, z: 0 };
+    // 距离 1.0 > 总臂长 0.54，不可达
+    const target = { x: 0, y: 0.5, z: 1.0 };
+    const result = solveFABRIK(shoulder, target, 0.28, 0.26, 'left', undefined, 10);
+    expect(Number.isFinite(result.shoulderRotation.x)).toBe(true);
+    expect(Number.isNaN(result.elbowRotation.x)).toBe(false);
+  });
+
+  it('零长度骨骼应 fallback 到解析法', () => {
+    const shoulder = { x: 0, y: 0.5, z: 0 };
+    const target = { x: 0.3, y: 0.5, z: 0 };
+    const result = solveFABRIK(shoulder, target, 0, 0.26, 'left');
+    expect(Number.isFinite(result.shoulderRotation.x)).toBe(true);
+    expect(Number.isNaN(result.elbowRotation.x)).toBe(false);
+  });
+
+  it('负方向目标应正常求解', () => {
+    const shoulder = { x: 0, y: 0.5, z: 0 };
+    // target.y < shoulder.y，腕部目标在肩下方
+    const target = { x: 0, y: 0.1, z: 0 };
+    const L1 = 0.28, L2 = 0.26;
+    const result = solveFABRIK(shoulder, target, L1, L2, 'left', undefined, 10);
+    const wrist = fkWristPos(result, shoulder, L1, L2);
+    const err = wrist.distanceTo(new THREE.Vector3(target.x, target.y, target.z));
+    expect(err).toBeLessThanOrEqual(1e-3);
+  });
+
+  it('iterations=10 足以收敛可达目标', () => {
+    const shoulder = { x: 0, y: 0.5, z: 0 };
+    const target = { x: 0.2, y: 0.3, z: 0.15 };
+    const L1 = 0.28, L2 = 0.26;
+    const result = solveFABRIK(shoulder, target, L1, L2, 'right', undefined, 10);
+    const wrist = fkWristPos(result, shoulder, L1, L2);
+    const err = wrist.distanceTo(new THREE.Vector3(target.x, target.y, target.z));
+    expect(err).toBeLessThanOrEqual(1e-3);
+  });
+});
+
+describe('solveFABRIKMultiChain', () => {
+  it('左右臂协同应分别返回有效结果', () => {
+    const left: ArmIKTarget = {
+      shoulderPos: { x: -0.18, y: 1.4, z: 0 },
+      wristTargetPos: { x: -0.3, y: 0.9, z: 0.2 },
+      upperArmLength: 0.28,
+      forearmLength: 0.26,
+    };
+    const right: ArmIKTarget = {
+      shoulderPos: { x: 0.18, y: 1.4, z: 0 },
+      wristTargetPos: { x: 0.3, y: 0.9, z: 0.2 },
+      upperArmLength: 0.28,
+      forearmLength: 0.26,
+    };
+    const result = solveFABRIKMultiChain({ left, right });
+    expect(result.left).toBeDefined();
+    expect(result.right).toBeDefined();
+    expect(Number.isFinite(result.left!.shoulderRotation.x)).toBe(true);
+    expect(Number.isFinite(result.right!.shoulderRotation.x)).toBe(true);
+  });
+
+  it('仅传一侧应只返回一侧结果', () => {
+    const left: ArmIKTarget = {
+      shoulderPos: { x: -0.18, y: 1.4, z: 0 },
+      wristTargetPos: { x: -0.3, y: 0.9, z: 0.2 },
+      upperArmLength: 0.28,
+      forearmLength: 0.26,
+    };
+    const result = solveFABRIKMultiChain({ left });
+    expect(result.left).toBeDefined();
+    expect(result.right).toBeUndefined();
   });
 });

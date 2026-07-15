@@ -12,6 +12,7 @@
 // 都能得到正确的肩旋转。肘部弯曲用余弦定理求屈曲角。
 import * as THREE from 'three';
 import type { Vec3 } from '@/types/avatar';
+import { logger } from '@/modules/debug/logger';
 
 /** IK 求解结果 */
 export interface IKResult {
@@ -206,6 +207,211 @@ export function solveSpine(
       result.chest.z = -chestAngle;
       result.upperChest!.z = -upperChestAngle;
       break;
+  }
+  return result;
+}
+
+// ==================== FABRIK IK 求解器 ====================
+// 基于前后向迭代逼近的逆运动学算法，支持 pole vector（肘引导）约束。
+// 失败时自动回退到解析法 solve。
+
+const fabLog = logger.module('IKSolver');
+
+/** 单臂 IK 目标参数（用于多链协同） */
+export interface ArmIKTarget {
+  shoulderPos: Vec3;
+  wristTargetPos: Vec3;
+  upperArmLength: number;
+  forearmLength: number;
+  elbowHint?: THREE.Vector3;
+}
+
+/**
+ * pole vector 约束：将 elbow 旋转到 shoulder→wrist 轴与 poleDir 方向所构成的平面
+ * 保持 elbow 到轴的垂直距离不变（下一轮前后向迭代会修正长度）
+ *
+ * 退化处理：当 elbow 落在 shoulder-wrist 轴上（radial≈0，如初始或伸直状态），
+ * 用余弦定理求三角形高度作为偏移，使肘部获得初始弯曲，避免 FABRIK 退化为伸直。
+ *
+ * @param joints [shoulder, elbow, wrist]
+ * @param poleDir 肘引导方向（世界坐标系方向向量）
+ * @param L1 上臂长（退化时计算三角形高度）
+ * @param L2 前臂长（退化时计算三角形高度）
+ */
+function applyPoleConstraint(
+  joints: THREE.Vector3[],
+  poleDir: THREE.Vector3,
+  L1: number,
+  L2: number,
+): void {
+  const [shoulder, elbow, wrist] = joints;
+  // shoulder→wrist 轴
+  const axis = new THREE.Vector3().subVectors(wrist, shoulder);
+  const axisLen = axis.length();
+  if (axisLen < 1e-9) return; // 退化（肩腕重合），跳过
+  axis.divideScalar(axisLen);
+
+  // elbow 在轴上的投影点 pivot
+  const se = new THREE.Vector3().subVectors(elbow, shoulder);
+  const t = se.dot(axis);
+  const pivot = new THREE.Vector3().copy(shoulder).addScaledVector(axis, t);
+
+  // poleDir 投影到垂直于 axis 的平面
+  const perp = poleDir.clone().sub(axis.multiplyScalar(poleDir.dot(axis)));
+  if (perp.lengthSq() < 1e-12) return; // pole 与轴平行，跳过
+  perp.normalize();
+
+  let radial = elbow.distanceTo(pivot);
+  // 退化处理：elbow 落在轴上时，用三角形高度作为偏移
+  if (radial < 1e-4) {
+    const c = axisLen;
+    const s = (L1 + L2 + c) / 2;
+    const areaSq = s * (s - L1) * (s - L2) * (s - c);
+    radial = areaSq > 0 ? (2 * Math.sqrt(areaSq) / Math.max(c, 1e-9)) : L1 * 0.3;
+  }
+  elbow.copy(pivot).addScaledVector(perp, radial);
+}
+
+/**
+ * FABRIK（Forward And Backward Reaching IK）2 段求解
+ * 通过前后向迭代逼近目标，支持 pole vector（肘引导）约束。
+ * 失败（未收敛或输入非法）时回退到解析法 solve。
+ *
+ * @param shoulderPos 肩部世界位置
+ * @param wristTargetPos 腕部目标世界位置
+ * @param upperArmLength 上臂长（肩→肘）
+ * @param forearmLength 前臂长（肘→腕）
+ * @param side 左/右，决定肘部默认引导方向（左臂 +X，右臂 -X）
+ * @param elbowHint 肘引导方向（pole vector），缺省按 side 给出
+ * @param iterations 迭代次数，默认 10
+ */
+export function solveFABRIK(
+  shoulderPos: Vec3,
+  wristTargetPos: Vec3,
+  upperArmLength: number,
+  forearmLength: number,
+  side: 'left' | 'right',
+  elbowHint?: THREE.Vector3,
+  iterations = 10,
+): IKResult {
+  const L1 = upperArmLength;
+  const L2 = forearmLength;
+
+  // 非法长度：回退解析法
+  if (L1 <= 0 || L2 <= 0) {
+    fabLog.warn('solveFABRIK 输入长度非正，回退解析法', { L1, L2 });
+    return solve(shoulderPos, wristTargetPos, L1, L2, side);
+  }
+
+  const totalLen = L1 + L2;
+  const shoulder = new THREE.Vector3(shoulderPos.x, shoulderPos.y, shoulderPos.z);
+  const target = new THREE.Vector3(wristTargetPos.x, wristTargetPos.y, wristTargetPos.z);
+
+  // 限制目标距离 ≤ totalLen（不可达时钳制到最大伸展方向）
+  const toTarget = new THREE.Vector3().subVectors(target, shoulder);
+  const targetDist = toTarget.length();
+  const clampedTarget = targetDist > totalLen
+    ? shoulder.clone().addScaledVector(toTarget.normalize(), totalLen)
+    : target;
+
+  // 初始化关节链 [shoulder, elbow, wrist]，elbow 取肩→目标连线按 L1 比例处
+  const joints: THREE.Vector3[] = [
+    shoulder.clone(),
+    new THREE.Vector3().lerpVectors(shoulder, clampedTarget, L1 / totalLen),
+    clampedTarget.clone(),
+  ];
+
+  // 默认肘引导方向（左 +X，右 -X，略向下偏前，与 solve 的 reference 一致）
+  const pole = elbowHint ?? new THREE.Vector3(side === 'left' ? 0.6 : -0.6, -1, 0.3);
+
+  // 复用临时向量，避免迭代内分配
+  const back = new THREE.Vector3();
+  const fwd = new THREE.Vector3();
+
+  for (let i = 0; i < iterations; i++) {
+    // === 后向（wrist→shoulder）===
+    joints[2].copy(clampedTarget);
+    // elbow 保持距 wrist = L2
+    back.subVectors(joints[1], joints[2]).setLength(L2).add(joints[2]);
+    joints[1].copy(back);
+    // shoulder 保持距 elbow = L1
+    back.subVectors(joints[0], joints[1]).setLength(L1).add(joints[1]);
+    joints[0].copy(back);
+
+    // === 前向（shoulder→wrist）===
+    joints[0].copy(shoulder);
+    fwd.subVectors(joints[1], joints[0]).setLength(L1).add(joints[0]);
+    joints[1].copy(fwd);
+    fwd.subVectors(joints[2], joints[1]).setLength(L2).add(joints[1]);
+    joints[2].copy(fwd);
+
+    // === pole vector 约束：拉肘部回到引导平面 ===
+    applyPoleConstraint(joints, pole, L1, L2);
+
+    // 收敛检查：wrist 到（钳制）目标距离 < 1e-3 提前退出
+    if (joints[2].distanceToSquared(clampedTarget) < 1e-6) break;
+  }
+
+  // 最终误差检查（用真实目标，非钳制目标）
+  const finalErr = joints[2].distanceTo(target);
+  if (finalErr > 1e-2) {
+    fabLog.warn('solveFABRIK 未收敛，回退解析法', { finalErr, iterations });
+    return solve(shoulderPos, wristTargetPos, L1, L2, side);
+  }
+
+  // === 关节方向 → 欧拉角（与 solve 一致的本地坐标约定）===
+  // shoulder：把 rest(-Y) 旋转到 shoulder→elbow 方向
+  const upperArmDir = back.subVectors(joints[1], joints[0]).normalize();
+  const shoulderQuat = new THREE.Quaternion().setFromUnitVectors(BONE_REST_DIR, upperArmDir);
+  const shoulderEuler = new THREE.Euler().setFromQuaternion(shoulderQuat, 'XYZ');
+
+  // elbow：前臂方向经 inv(shoulder) 转到肩本地，用 setFromUnitVectors 求完整旋转
+  // 保留 Y/Z 分量以保证 FK 重建精度（不强制铰链）
+  const forearmDir = fwd.subVectors(joints[2], joints[1]);
+  if (forearmDir.lengthSq() < 1e-12) forearmDir.set(0, -1, 0);
+  forearmDir.normalize();
+  const forearmLocalDir = forearmDir.applyQuaternion(shoulderQuat.clone().invert());
+  const elbowQuat = new THREE.Quaternion().setFromUnitVectors(BONE_REST_DIR, forearmLocalDir);
+  const elbowEuler = new THREE.Euler().setFromQuaternion(elbowQuat, 'XYZ');
+
+  return {
+    shoulderRotation: { x: shoulderEuler.x, y: shoulderEuler.y, z: shoulderEuler.z },
+    elbowRotation: { x: elbowEuler.x, y: elbowEuler.y, z: elbowEuler.z },
+  };
+}
+
+/**
+ * 多链 FABRIK 求解（左右臂协同）
+ *
+ * 左右臂物理独立，无需相互约束，分别独立调用 solveFABRIK。
+ * 单帧耗时 < 1ms，采用顺序调用即可，无需真正并行。
+ *
+ * @param targets 左/右臂目标参数
+ */
+export function solveFABRIKMultiChain(targets: {
+  left?: ArmIKTarget;
+  right?: ArmIKTarget;
+}): { left?: IKResult; right?: IKResult } {
+  const result: { left?: IKResult; right?: IKResult } = {};
+  if (targets.left) {
+    result.left = solveFABRIK(
+      targets.left.shoulderPos,
+      targets.left.wristTargetPos,
+      targets.left.upperArmLength,
+      targets.left.forearmLength,
+      'left',
+      targets.left.elbowHint,
+    );
+  }
+  if (targets.right) {
+    result.right = solveFABRIK(
+      targets.right.shoulderPos,
+      targets.right.wristTargetPos,
+      targets.right.upperArmLength,
+      targets.right.forearmLength,
+      'right',
+      targets.right.elbowHint,
+    );
   }
   return result;
 }

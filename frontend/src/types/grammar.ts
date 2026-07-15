@@ -59,7 +59,14 @@ export interface GlossSequence {
 
 /** 非手动规则触发条件 */
 export interface NonManualRule {
-  trigger: 'question' | 'negation' | 'emphasis' | 'conditional';
+  trigger:
+    | 'question'
+    | 'negation'
+    | 'emphasis'
+    | 'conditional'
+    | 'completion'
+    | 'continuous'
+    | 'experience';
   expression: string;
   head_movement: string;
 }

@@ -41,6 +41,9 @@ export class GlossMapper {
     const unmatchedWords: string[] = [];
 
     for (const token of tokens) {
+      // 时态助词（了/着/过）的语义由 NonManualMarker 承载，不映射到手语词汇
+      if (token.pos === 'u') continue;
+
       const glossId = await this.lookupGlossId(token.word);
       if (glossId) {
         items.push({

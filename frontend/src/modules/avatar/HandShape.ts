@@ -181,6 +181,17 @@ const HAND_SHAPE_DEFINITIONS: Record<HandShape, HandShapeDefinition> = {
       fp(deg(90), deg(100), deg(90)),
     ],
   },
+  // 勾连手形：食指弯曲如钩，其余四指完全屈曲，用于"朋友"等勾连动作
+  [HandShape.HOOK]: {
+    shape: HandShape.HOOK,
+    fingers: [
+      fp(deg(30), deg(40), deg(40)),     // 拇指微屈贴向食指
+      fp(deg(60), deg(90), deg(60)),     // 食指中节弯曲形成钩状
+      fp(deg(90), deg(100), deg(90)),    // 中指屈曲
+      fp(deg(90), deg(100), deg(90)),    // 无名指屈曲
+      fp(deg(90), deg(100), deg(90)),    // 小指屈曲
+    ],
+  },
 };
 
 /** 线性插值 */

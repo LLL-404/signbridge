@@ -24,6 +24,21 @@ export class VRMAnimator {
   constructor(vrm: VRM) {
     // AnimationMixer 接收场景根节点，内部会遍历查找轨道目标
     this.mixer = new THREE.AnimationMixer(vrm.scene);
+
+    // 创建表情代理 Object3D：AnimationMixer 通过 PropertyBinding 解析
+    // 'expressionManager.<preset>' 轨道名时，需要找到名为 'expressionManager' 的节点，
+    // 并在其上设置 preset 属性。这里用 defineProperty 将属性转发到 vrm.expressionManager
+    const exprProxy = new THREE.Object3D();
+    exprProxy.name = 'expressionManager';
+    for (const preset of ['happy', 'sad', 'angry', 'surprised', 'relaxed']) {
+      Object.defineProperty(exprProxy, preset, {
+        get: () => vrm.expressionManager?.getValue(preset) ?? 0,
+        set: (v: number) => vrm.expressionManager?.setValue(preset, v),
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    vrm.scene.add(exprProxy);
   }
 
   /**

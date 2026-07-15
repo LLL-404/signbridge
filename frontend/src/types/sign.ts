@@ -48,6 +48,7 @@ export enum HandShape {
   EIGHT = 'eight',
   NINE = 'nine',
   TEN = 'ten',
+  HOOK = 'hook',
 }
 
 /** 手指关节角度（单关节三自由度） */
@@ -95,6 +96,13 @@ export enum Movement {
   ZIGZAG = 'zigzag',
   TOWARD_BODY = 'toward_body',
   AWAY_FROM_BODY = 'away_from_body',
+  WAVE = 'wave',
+  TAP = 'tap',
+  TAP_TWICE = 'tap_twice',
+  FORWARD = 'forward',
+  HOOK_TOGETHER = 'hook_together',
+  WAVE_TWIST = 'wave_twist',
+  SIDE_TO_SIDE = 'side_to_side',
 }
 
 /** 手掌朝向枚举 */
@@ -128,4 +136,6 @@ export enum HeadMovement {
   TILT_LEFT = 'tilt_left',
   TILT_RIGHT = 'tilt_right',
   SLIGHT_NOD = 'slight_nod',
+  TILT = 'tilt',
+  SLIGHT_BOW = 'slight_bow',
 }

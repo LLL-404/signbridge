@@ -44,7 +44,7 @@ const LIMB = {
 };
 
 /** 手指长度配置（每节长度，单位：Three.js 坐标） */
-const FINGER_LENGTHS: Record<string, [number, number, number, number?]> = {
+const FINGER_LENGTHS: Record<string, number[]> = {
   thumb:  [0.035, 0.040, 0.030, 0.025], // CMC/MCP/PIP/DIP
   index:  [0.050, 0.060, 0.040],         // MCP/PIP/DIP
   middle: [0.055, 0.065, 0.045],

@@ -28,11 +28,39 @@ import { VRMLoaderPlugin, type VRM } from '@pixiv/three-vrm';
 import { VRMAnimator } from '@/modules/avatar/VRMAnimator';
 import { VRMAdapter } from '@/modules/avatar/VRMAdapter';
 import { RealtimePoseDriver } from '@/modules/avatar/RealtimePoseDriver';
+import { extractVRMCConstraints, setVRMConstraintCache } from '@/modules/avatar/JointLimits';
 import type { PoseEstimate } from '@/modules/recognition/PoseEstimator';
 import type { BonePose, VRMPose } from '@/types/avatar';
 import { logger } from '@/modules/debug/logger';
 
 const log = logger.module('VRMModel');
+
+/**
+ * VRM 加载缓存：防止 React StrictMode 双重渲染导致重复加载
+ * 同一 URL 只发起一次 GLTFLoader.load 请求，后续调用复用 Promise
+ */
+const vrmLoadCache = new Map<string, Promise<VRM>>();
+
+function loadVRMCached(url: string): Promise<VRM> {
+  const cached = vrmLoadCache.get(url);
+  if (cached) return cached;
+  const promise = new Promise<VRM>((resolve, reject) => {
+    const loader = new GLTFLoader();
+    loader.register((parser) => new VRMLoaderPlugin(parser));
+    loader.load(
+      url,
+      (gltf) => {
+        const vrm = gltf.userData.vrm as VRM;
+        if (!vrm) { reject(new Error('VRM data not found in gltf')); return; }
+        resolve(vrm);
+      },
+      undefined,
+      (err) => reject(err),
+    );
+  });
+  vrmLoadCache.set(url, promise);
+  return promise;
+}
 
 /** VRMModel Props */
 export interface VRMModelProps {
@@ -73,6 +101,8 @@ export function VRMModel({
   const vrmRef = useRef<VRM | null>(null);
   /** VRMAnimator 实例（封装 AnimationMixer），在 VRM 加载成功后创建 */
   const vrmAnimatorRef = useRef<VRMAnimator | null>(null);
+  /** VRM.update 异常已记录标志（避免每帧刷屏） */
+  const vrmUpdateErrorLoggedRef = useRef(false);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // ===== 实时姿态驱动相关实例（保留实时追踪路径）=====
@@ -106,20 +136,25 @@ export function VRMModel({
   }, [useRealtimeTracking, realtimePoseEstimate]);
 
   // 异步加载 VRM
+  // 使用模块级 loadVRMCached 缓存加载 Promise：React StrictMode 双重渲染时，
+  // 两次 useEffect 会复用同一个 Promise，避免 GLTFLoader 重复发起请求导致
+  // 首次请求被浏览器取消（ERR_ABORTED）
   useEffect(() => {
-    const loader = new GLTFLoader();
-    loader.register((parser) => new VRMLoaderPlugin(parser));
+    let cancelled = false;
 
-    loader.load(
-      modelUrl,
-      (gltf) => {
-        const vrm = gltf.userData.vrm as VRM;
-        if (!vrm) return;
+    loadVRMCached(modelUrl)
+      .then((vrm) => {
+        if (cancelled) return;
 
         vrmRef.current = vrm;
         vrm.scene.traverse((obj) => {
           if (obj instanceof THREE.Mesh) obj.frustumCulled = false;
         });
+
+        // 提取 VRM 1.0 内置的 VRMC_node_constraint 约束并存入模块级缓存，
+        // 供 ClipBuilder.buildClip 时读取（无约束时返回空 Map，回退到 JointLimits）
+        const constraints = extractVRMCConstraints(vrm);
+        setVRMConstraintCache(vrm, constraints);
 
         // 此 VRM 模型本身面朝 +Z（右臂在 -X，非标准 VRM），已朝向相机，无需旋转
         // VRM hips 通常在 y=0 附近，偏移对齐舞台
@@ -146,14 +181,13 @@ export function VRMModel({
         if (vrmAnimatorRef.current) {
           onLoaded?.(vrm, vrmAnimatorRef.current);
         }
-      },
-      undefined,
-      (err) => {
-        log.error('Failed to load VRM', err);
-      },
-    );
+      })
+      .catch((err) => {
+        if (!cancelled) log.error('Failed to load VRM', err);
+      });
 
     return () => {
+      cancelled = true;
       if (vrmRef.current) {
         if (vrmRef.current.scene.parent) {
           vrmRef.current.scene.parent.remove(vrmRef.current.scene);
@@ -181,7 +215,19 @@ export function VRMModel({
     // 推进 AnimationMixer（AvatarDriver.playClip 触发的动画在此处推进）
     vrmAnimatorRef.current?.update(delta);
     // 更新 spring bone/lookAt/expression（必须在 mixer.update 之后）
-    vrm.update(delta);
+    // 包裹 try-catch：当前 VRM 模型部分 humanoid bone 节点为 null，
+    // vrm.update() 内部遍历骨骼调用 updateWorldMatrix 时会抛 TypeError。
+    // 捕获后 normalized→raw bone 同步可能不完整，但 AnimationMixer 已更新
+    // normalized bone，部分 raw bone 仍可被正确同步，动画大体可播放。
+    try {
+      vrm.update(delta);
+    } catch (e) {
+      // 首次错误记录完整日志，后续静默避免刷屏
+      if (!vrmUpdateErrorLoggedRef.current) {
+        log.error('VRM.update 异常（部分骨骼节点可能为 null，动画可能不完整）', e);
+        vrmUpdateErrorLoggedRef.current = true;
+      }
+    }
 
     // ===== 注视跟踪 =====
     if (lookAtTarget && vrm.lookAt) {

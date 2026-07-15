@@ -10,10 +10,12 @@
 import * as THREE from 'three';
 import type { VRM } from '@pixiv/three-vrm';
 import type { SignGloss } from '@/types/sign';
-import { HandLocation, HandShape, FacialExpression, Movement } from '@/types/sign';
+import { HandLocation, HandShape, FacialExpression, Movement, PalmOrientation } from '@/types/sign';
 import type { Vec3 } from '@/types/avatar';
 import { getHandShapeDefinition } from './HandShape';
-import { clampRotationAngle, computeHingeAxis, constrainHingeJoint } from './JointLimits';
+import { computeHingeAxis, constrainHingeJoint, constrainShoulderByDirection, constrainForearmRotation, applyVRMCConstraints, getVRMConstraintCache, type VRMConstraintMap } from './JointLimits';
+import { buildBodyVolume, isInsideTorso, isInsideHead, projectToSurface, type BodyVolume } from './BodyVolume';
+import { parseHandShape, parseHandLocation, parseFacialExpression, parsePalmOrientation } from './EnumParser';
 import { logger } from '@/modules/debug/logger';
 
 const log = logger.module('ClipBuilder');
@@ -25,9 +27,6 @@ const STANDARD_SHOULDER_HALF_WIDTH = 0.22;
 
 /** 默认动作时长（毫秒） */
 const DEFAULT_DURATION_MS = 1000;
-
-/** 5 个采样点的时间比例（0%, 25%, 50%, 75%, 100%） */
-const SAMPLE_TIMES = [0, 0.25, 0.5, 0.75, 1.0] as const;
 
 /** 上方向单位向量，用于计算肘部铰链轴 */
 const UP = new THREE.Vector3(0, 1, 0);
@@ -108,19 +107,19 @@ interface ModelScale {
 
 const MODEL_SCALE_CACHE = new WeakMap<VRM, ModelScale>();
 
+// ===== VRMC 约束状态（由 buildClip 入口设置，solveArmQuaternions 读取）=====
+// 当前 VRM 模型的约束缓存（buildClip 入口从全局缓存读取，避免每帧重复读取）
+let currentVRMConstraints: VRMConstraintMap = new Map();
+// 本 clip 的 VRMC 约束命中/回退统计（buildClip 入口重置，末尾输出日志）
+let vrmcHitCount = 0;
+let vrmcFallbackCount = 0;
+
 // ===== 辅助函数 =====
 
 /** 读取骨骼世界位置 */
 function getBoneWorldPos(node: THREE.Object3D | null, out: THREE.Vector3): THREE.Vector3 {
   if (node) node.getWorldPosition(out);
   return out;
-}
-
-/** 计算骨骼长度：子骨骼相对父骨骼的平移距离（rest pose 下即骨骼长度） */
-function getBoneLength(childNode: THREE.Object3D | null, fallback: number): number {
-  if (!childNode) return fallback;
-  const len = childNode.position.length();
-  return len > 0.001 && len < 2.0 ? len : fallback;
 }
 
 /** 计算模型实际尺寸比例（首次计算后缓存） */
@@ -161,37 +160,194 @@ function scaleOffsetY(y: number, scale: ModelScale): number {
   return scale.shoulderY + t * (scale.headTopY - scale.shoulderY);
 }
 
-/** 字符串安全转 HandShape 枚举，无法识别时返回 OPEN_5 */
-function parseHandShape(s: string): HandShape {
-  const values = Object.values(HandShape);
-  return (values as string[]).includes(s) ? (s as HandShape) : HandShape.OPEN_5;
+/** 轨迹点：时间（秒）+ scene 本地坐标系下的目标位置 */
+interface TrajectoryPoint {
+  time: number;
+  position: THREE.Vector3;
 }
 
-/** 字符串安全转 HandLocation 枚举，无法识别时返回 NEUTRAL */
-function parseHandLocation(s: string): HandLocation {
-  const values = Object.values(HandLocation);
-  return (values as string[]).includes(s) ? (s as HandLocation) : HandLocation.NEUTRAL;
-}
+/**
+ * 根据 Movement 枚举生成手臂运动轨迹点
+ * 所有点的 time 在 [0, durationSec] 范围内均匀分布
+ * @param movement 运动类型枚举
+ * @param startTarget 起始目标位置（scene 本地坐标系）
+ * @param endTarget 终止目标位置（scene 本地坐标系）
+ * @param durationSec 动画时长（秒）
+ * @returns 轨迹点数组
+ */
+function buildMovementTrajectory(
+  movement: Movement,
+  startTarget: THREE.Vector3,
+  endTarget: THREE.Vector3,
+  durationSec: number,
+): TrajectoryPoint[] {
+  // 线性类运动：5 点线性插值
+  const buildLinear = (count: number): TrajectoryPoint[] => {
+    const points: TrajectoryPoint[] = [];
+    for (let i = 0; i < count; i++) {
+      const t = i / (count - 1);
+      points.push({
+        time: t * durationSec,
+        position: startTarget.clone().lerp(endTarget, t),
+      });
+    }
+    return points;
+  };
 
-/** 字符串安全转 FacialExpression 枚举 */
-function parseFacialExpression(s: string): FacialExpression {
-  const values = Object.values(FacialExpression);
-  return (values as string[]).includes(s) ? (s as FacialExpression) : FacialExpression.NEUTRAL;
-}
-
-/** 根据 movement 方向对位置施加偏移（用于起止位置相同时的运动） */
-function applyMovementOffset(pos: Vec3, movement: string): Vec3 {
-  const offset = 0.2;
   switch (movement) {
-    case 'upward':         return { ...pos, y: pos.y + offset };
-    case 'downward':       return { ...pos, y: pos.y - offset };
-    case 'leftward':       return { ...pos, x: pos.x - offset };
-    case 'rightward':      return { ...pos, x: pos.x + offset };
-    case 'toward_body':    return { ...pos, z: pos.z - offset };
-    case 'away_from_body': return { ...pos, z: pos.z + offset };
-    case 'horizontal_line':return { ...pos, x: pos.x + offset };
-    case 'vertical_line':  return { ...pos, y: pos.y + offset };
-    default: return { ...pos };
+    // 1. 线性类（含 STATIC：起止相同，所有点位置一致）
+    case Movement.STATIC:
+    case Movement.UPWARD:
+    case Movement.DOWNWARD:
+    case Movement.LEFTWARD:
+    case Movement.RIGHTWARD:
+    case Movement.TOWARD_BODY:
+    case Movement.AWAY_FROM_BODY:
+    case Movement.FORWARD:
+    case Movement.HORIZONTAL_LINE:
+    case Movement.VERTICAL_LINE:
+      return buildLinear(5);
+
+    // 2. 弧线类：线性插值 + Y 方向抛物线偏移
+    case Movement.UPWARD_ARC:
+    case Movement.DOWNWARD_ARC: {
+      const yOffset = movement === Movement.UPWARD_ARC ? 0.15 : -0.15;
+      const points: TrajectoryPoint[] = [];
+      for (let i = 0; i < 5; i++) {
+        const t = i / 4;
+        const pos = startTarget.clone().lerp(endTarget, t);
+        pos.y += 4 * t * (1 - t) * yOffset;
+        points.push({ time: t * durationSec, position: pos });
+      }
+      return points;
+    }
+
+    // 3. 圆形：8 点圆周运动（XZ 平面）
+    case Movement.CIRCULAR: {
+      const center = startTarget.clone().add(endTarget).multiplyScalar(0.5);
+      const radius = 0.15;
+      const points: TrajectoryPoint[] = [];
+      for (let i = 0; i < 8; i++) {
+        const t = i / 8;
+        const theta = t * Math.PI * 2;
+        points.push({
+          time: t * durationSec,
+          position: new THREE.Vector3(
+            center.x + radius * Math.cos(theta),
+            center.y,
+            center.z + radius * Math.sin(theta),
+          ),
+        });
+      }
+      return points;
+    }
+
+    // 4. 之字形：6 点折线，X 方向交替偏移
+    case Movement.ZIGZAG: {
+      const xOffsets = [0, 0.1, -0.1, 0.1, -0.1, 0];
+      const points: TrajectoryPoint[] = [];
+      for (let i = 0; i < 6; i++) {
+        const t = i / 5;
+        const pos = startTarget.clone().lerp(endTarget, t);
+        pos.x += xOffsets[i];
+        points.push({ time: t * durationSec, position: pos });
+      }
+      return points;
+    }
+
+    // 5. 摆动：8 点往复振荡，X 方向叠加正弦波（2 个周期）
+    case Movement.WAVE:
+    case Movement.SIDE_TO_SIDE:
+    case Movement.WAVE_TWIST: {
+      const amplitude = 0.12;
+      const sameStartEnd = startTarget.equals(endTarget);
+      const points: TrajectoryPoint[] = [];
+      for (let i = 0; i < 8; i++) {
+        const t = i / 8;
+        const base = sameStartEnd
+          ? startTarget.clone()
+          : startTarget.clone().lerp(endTarget, t);
+        base.x += amplitude * Math.sin(2 * Math.PI * 2 * t);
+        points.push({ time: t * durationSec, position: base });
+      }
+      return points;
+    }
+
+    // 6. 点触 TAP：5 点 1 次往返（start→接触→start→接触→start）
+    case Movement.TAP: {
+      const contact = startTarget.clone().add(new THREE.Vector3(0, 0, 0.1));
+      const positions = [
+        startTarget.clone(), contact, startTarget.clone(),
+        contact.clone(), startTarget.clone(),
+      ];
+      return positions.map((pos, i) => ({
+        time: (i / 4) * durationSec,
+        position: pos,
+      }));
+    }
+
+    // 6b. 点触 TAP_TWICE：6 点 2 次往返
+    case Movement.TAP_TWICE: {
+      const contact = startTarget.clone().add(new THREE.Vector3(0, 0, 0.1));
+      const positions = [
+        startTarget.clone(), contact, startTarget.clone(),
+        contact.clone(), startTarget.clone(), contact.clone(),
+      ];
+      return positions.map((pos, i) => ({
+        time: (i / 5) * durationSec,
+        position: pos,
+      }));
+    }
+
+    // 7. 勾连：5 点向中心汇聚，X 渐趋向 0，Y 渐降
+    case Movement.HOOK_TOGETHER: {
+      const points: TrajectoryPoint[] = [];
+      for (let i = 0; i < 5; i++) {
+        const t = i / 4;
+        points.push({
+          time: t * durationSec,
+          position: new THREE.Vector3(
+            THREE.MathUtils.lerp(startTarget.x, 0, t),
+            THREE.MathUtils.lerp(startTarget.y, endTarget.y, t) - 0.05 * t,
+            THREE.MathUtils.lerp(startTarget.z, endTarget.z, t),
+          ),
+        });
+      }
+      return points;
+    }
+
+    default:
+      return buildLinear(5);
+  }
+}
+
+/**
+ * 在 IK 解算的手腕四元数上叠加掌向旋转修正
+ * IK 解算默认让手掌朝向身体内侧（INWARD），其他朝向需要额外旋转
+ */
+function applyPalmOrientation(
+  orientation: PalmOrientation,
+  side: 'left' | 'right',
+): THREE.Quaternion {
+  const sign = side === 'left' ? -1 : 1;
+  switch (orientation) {
+    case PalmOrientation.INWARD:
+      return new THREE.Quaternion(); // identity，IK 默认已向内
+    case PalmOrientation.OUTWARD:
+      // 绕 Z 轴翻转 π（掌心向外）
+      return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI);
+    case PalmOrientation.UPWARD:
+      // 绕 X 轴旋转 -π/2（掌心朝上）
+      return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2 * sign);
+    case PalmOrientation.DOWNWARD:
+      // 绕 X 轴旋转 π/2（掌心朝下）
+      return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2 * sign);
+    case PalmOrientation.LEFTWARD:
+      return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2 * sign);
+    case PalmOrientation.RIGHTWARD:
+      return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2 * sign);
+    default:
+      return new THREE.Quaternion();
   }
 }
 
@@ -250,7 +406,9 @@ function solveArmQuaternions(
   side: 'left' | 'right',
   upperRestDir: THREE.Vector3,
   lowerRestDir: THREE.Vector3,
-): { upper: THREE.Quaternion; lower: THREE.Quaternion } {
+  bodyVolume?: BodyVolume,
+  hipsDir?: THREE.Vector3,
+): { upper: THREE.Quaternion; lower: THREE.Quaternion; elbowPenetrated: boolean } {
   const S = shoulderPos.clone();
   const W = wristTarget.clone();
   const L1 = upperLen;
@@ -274,9 +432,20 @@ function solveArmQuaternions(
   const shoulderLift = Math.acos(Math.max(-1, Math.min(1, cosLift)));
 
   // === 2. 肘弯曲平面（swivel / 肘引导方向） ===
-  // 肘部倾向身体内侧下方，Z 分量较大让肘部向前方伸出，防止穿入躯干
-  const sideBias = side === 'left' ? 0.6 : -0.6;
-  const reference = new THREE.Vector3(sideBias, -1.0, 0.6).normalize();
+  // 肘引导方向基于 shoulder → hips 向量动态推导，适配不同 rest pose：
+  // - Y 分量来自 hipsDir（指向下的躯干方向），让肘部倾向身体下方
+  // - Z 分量前伸（+0.6），防止肘部向后穿入躯干
+  // - X 分量侧偏（upperRestDir.x × 0.6），适配 T-pose（手臂水平外展时侧偏明显）
+  //   与 A-pose（upperRestDir.x ≈ 0，侧偏退化，依赖 Y/Z 引导）
+  // 旧实现硬编码 (sideBias, -1.0, 0.6)，对 A-pose 失效：A-pose 时 upperRestDir.x ≈ 0，
+  // 硬编码 reference.y = -1 与 hipsDir.y 方向相同但缺少 scene 实际朝向信息；
+  // 动态化后即便 shoulder→hips 不严格垂直（脊柱前倾等）也能正确引导
+  const downDir = hipsDir ?? new THREE.Vector3(0, -1, 0);
+  const reference = new THREE.Vector3(
+    downDir.x + upperRestDir.x * 0.6,  // X：侧偏（适配 T-pose 与 A-pose）
+    downDir.y,                          // Y：向下（来自 shoulder→hips 方向）
+    downDir.z + 0.6,                    // Z：前伸（防止肘向后穿入躯干）
+  ).normalize();
 
   // 投影到垂直于 dir 的平面
   const refDotDir = reference.dot(dir);
@@ -296,29 +465,93 @@ function solveArmQuaternions(
   // === 5. 肘部四元数 ===
   // 肘位置
   const elbowPos = S.clone().add(upperArmDir.clone().multiplyScalar(L1));
-  // 前臂方向（从肘到腕，世界坐标）
-  const forearmDir = new THREE.Vector3().subVectors(W, elbowPos).normalize();
+
+  // 肘部穿透检测与修正：当肘位置穿入躯干胶囊时，沿外法线投影到躯干表面。
+  // 防止 IK 解算后肘部嵌入躯干（如手腕目标在身前近端时，上臂可能向内弯折导致肘穿入）
+  let correctedElbowPos = elbowPos;
+  const elbowPenetrated = !!(bodyVolume && isInsideTorso(elbowPos, bodyVolume));
+  if (elbowPenetrated) {
+    correctedElbowPos = projectToSurface(elbowPos, bodyVolume);
+    log.debug('肘部穿透修正', {
+      side,
+      original: elbowPos.clone(),
+      corrected: correctedElbowPos.clone(),
+    });
+  }
+
+  // 前臂方向（从修正后的肘到腕，世界坐标）
+  const forearmDir = new THREE.Vector3().subVectors(W, correctedElbowPos).normalize();
   // 前臂方向转换到肘本地坐标系（应用肩部旋转的逆）
   const invUpper = upperQuat.clone().invert();
   const forearmLocalDir = forearmDir.clone().applyQuaternion(invUpper);
   // 肘部四元数：把 lowerRestDir 旋转到 forearmLocalDir
   const lowerQuat = new THREE.Quaternion().setFromUnitVectors(lowerRestDir, forearmLocalDir);
 
-  // === 6. 肩关节角度约束（球窝关节，≤ 170°） ===
-  upperQuat.copy(clampRotationAngle(upperQuat, (170 * Math.PI) / 180));
+  // === 6. 肩关节角度约束（按解剖学方向分别限制：外展≤120°/前屈≤180°/后伸≤60°） ===
+  // 旧实现用 clampRotationAngle(170°) 一刀切，无法区分外展与前屈，且对 A-pose 不友好；
+  // constrainShoulderByDirection 自动适配 T-pose / A-pose 并按主旋转方向选择限制值
+  upperQuat.copy(constrainShoulderByDirection(upperQuat, upperRestDir));
 
   // === 7. 肘关节铰链约束（单向弯曲 0°-150°） ===
   const hingeAxis = computeHingeAxis(upperRestDir, UP);
+
+  // 诊断用：手动计算 signedAngle（与 constrainHingeJoint 内部逻辑一致）
+  const _diagDot = THREE.MathUtils.clamp(lowerRestDir.dot(forearmLocalDir), -1, 1);
+  const _diagAngle = Math.acos(_diagDot);
+  const _diagRotAxis = new THREE.Vector3().crossVectors(lowerRestDir, forearmLocalDir);
+  let signedAngle = 0;
+  if (_diagRotAxis.lengthSq() > 1e-6) {
+    _diagRotAxis.normalize();
+    signedAngle = _diagRotAxis.dot(hingeAxis) * _diagAngle;
+  }
+
   lowerQuat.copy(constrainHingeJoint(
     lowerRestDir, forearmLocalDir, hingeAxis, 0, (150 * Math.PI) / 180,
   ));
+  // 铰链约束之后追加前臂旋前/旋后限制（±80°），传入纯铰链四元数避免与弯曲耦合
+  lowerQuat.copy(constrainForearmRotation(lowerQuat, hingeAxis));
 
-  return { upper: upperQuat, lower: lowerQuat };
+  // === 8. VRMC_node_constraint 约束（如有） ===
+  // 优先使用 VRM 1.0 模型内置约束（roll/aim/rotation），无约束时跳过本步骤
+  // 约束缓存由 VRMModel.tsx 在 VRM 加载时填充，由 buildClip 入口写入 currentVRMConstraints
+  if (currentVRMConstraints.size > 0) {
+    const upperBoneName = side === 'left' ? 'leftUpperArm' : 'rightUpperArm';
+    const lowerBoneName = side === 'left' ? 'leftLowerArm' : 'rightLowerArm';
+    const result = applyVRMCConstraints(upperQuat, lowerQuat, upperBoneName, lowerBoneName, currentVRMConstraints);
+    if (result.applied) {
+      upperQuat.copy(result.upper);
+      lowerQuat.copy(result.lower);
+      vrmcHitCount++;
+    } else {
+      vrmcFallbackCount++;
+    }
+  }
+
+  log.debug('solveArmQuaternions 诊断', {
+    side,
+    upperRestDir: { x: upperRestDir.x, y: upperRestDir.y, z: upperRestDir.z },
+    lowerRestDir: { x: lowerRestDir.x, y: lowerRestDir.y, z: lowerRestDir.z },
+    shoulderPos: { x: S.x, y: S.y, z: S.z },
+    wristTarget: { x: W.x, y: W.y, z: W.z },
+    dir: { x: dir.x, y: dir.y, z: dir.z },
+    shoulderLift: shoulderLift * 180 / Math.PI,
+    elbowDir: { x: elbowDir.x, y: elbowDir.y, z: elbowDir.z },
+    upperArmDir: { x: upperArmDir.x, y: upperArmDir.y, z: upperArmDir.z },
+    elbowPos: { x: elbowPos.x, y: elbowPos.y, z: elbowPos.z },
+    forearmDir: { x: forearmDir.x, y: forearmDir.y, z: forearmDir.z },
+    forearmLocalDir: { x: forearmLocalDir.x, y: forearmLocalDir.y, z: forearmLocalDir.z },
+    hingeAxis: { x: hingeAxis.x, y: hingeAxis.y, z: hingeAxis.z },
+    hingeAxisLength: hingeAxis.length(),
+    signedAngle: signedAngle * 180 / Math.PI,
+  });
+
+  return { upper: upperQuat, lower: lowerQuat, elbowPenetrated };
 }
 
 /**
- * 生成单只手臂（肩 + 肘）的 QuaternionKeyframeTrack
- * 在 5 个采样点用 lerp 插值起止位置后调用 IK，记录肩肘四元数
+ * 生成单只手臂（肩 + 肘 + 手腕）的 QuaternionKeyframeTrack
+ * 使用 buildMovementTrajectory 生成运动路径，对每个点调用 IK 解算
+ * 手腕轨道由 palmOrientation 常量四元数驱动
  */
 function buildArmTracks(
   vrm: VRM,
@@ -328,6 +561,9 @@ function buildArmTracks(
   durationSec: number,
   hipsSceneLocal: THREE.Vector3,
   scale: ModelScale,
+  movement: Movement,
+  palmOrientation: PalmOrientation,
+  clipLabel: string,
 ): THREE.QuaternionKeyframeTrack[] {
   const humanoid = vrm.humanoid;
   const upperBoneName = side === 'left' ? 'leftUpperArm' : 'rightUpperArm';
@@ -349,6 +585,16 @@ function buildArmTracks(
   const shoulderWorld = getBoneWorldPos(upperNode, new THREE.Vector3());
   const shoulderSceneLocal = vrm.scene.worldToLocal(shoulderWorld.clone());
 
+  // 构建身体包络体（每个 buildArmTracks 调用构建一次，避免每轨迹点重复计算）。
+  // 用于：1) 轨迹点手腕目标的合法性约束；2) solveArmQuaternions 内肘部穿透检测
+  const bodyVolume = buildBodyVolume(vrm);
+
+  // 计算 shoulder → hips 方向（指向下的躯干方向），作为肘引导方向的动态参考。
+  // 旧实现硬编码 (sideBias, -1.0, 0.6) 对 A-pose 失效；改用实际骨骼方向后，
+  // 即便脊柱前倾、hips 偏移等情况也能正确引导肘部倾向身体下方。
+  // 复用传入的 hipsSceneLocal 参数（已由调用方计算），避免重复读取骨骼与重复声明
+  const hipsDir = new THREE.Vector3().subVectors(hipsSceneLocal, shoulderSceneLocal).normalize();
+
   // 动态获取 normalized bone 的实际 rest direction
   // normalized bone 的子骨骼 position = boneWorldPos - parentBoneWorldPos
   // position 方向就是骨骼在 rest pose 下的"指向"
@@ -363,32 +609,79 @@ function buildArmTracks(
   const startTarget = offsetToSceneLocalTarget(startOffset, hipsSceneLocal, scale);
   const endTarget = offsetToSceneLocalTarget(endOffset, hipsSceneLocal, scale);
 
-  // 5 个采样点的四元数（每个 4 个分量：x, y, z, w）
-  const times = SAMPLE_TIMES.map(t => t * durationSec);
+  // 诊断日志：每 clip 只输出一次（非每采样点）
+  log.debug('buildArmTracks 诊断', {
+    side,
+    upperRestDir: { x: upperRestDir.x, y: upperRestDir.y, z: upperRestDir.z },
+    lowerRestDir: { x: lowerRestDir.x, y: lowerRestDir.y, z: lowerRestDir.z },
+    upperArmLen,
+    forearmLen,
+    shoulderSceneLocal: { x: shoulderSceneLocal.x, y: shoulderSceneLocal.y, z: shoulderSceneLocal.z },
+    startTarget: { x: startTarget.x, y: startTarget.y, z: startTarget.z },
+    endTarget: { x: endTarget.x, y: endTarget.y, z: endTarget.z },
+  });
+
+  // 使用轨迹函数生成运动路径点（替代旧的线性插值）
+  const trajectory = buildMovementTrajectory(movement, startTarget, endTarget, durationSec);
+
+  // 轨迹点合法性约束：手腕目标若穿入躯干或头部，沿外法线投影到包络表面。
+  // 在 IK 解算之前修正，避免解算出的肩肘四元数导致手腕穿模；
+  // 就地修改 point.position（trajectory 为本函数局部对象，不影响外部）
+  // 统计穿入数量用于数据级验证日志
+  let torsoHits = 0;
+  let headHits = 0;
+  for (const point of trajectory) {
+    if (isInsideTorso(point.position, bodyVolume)) {
+      torsoHits++;
+      point.position.copy(projectToSurface(point.position, bodyVolume));
+    } else if (isInsideHead(point.position, bodyVolume)) {
+      headHits++;
+      point.position.copy(projectToSurface(point.position, bodyVolume));
+    }
+  }
+
+  const times = trajectory.map(p => p.time);
   const upperQuats: number[] = [];
   const lowerQuats: number[] = [];
 
-  for (const t of SAMPLE_TIMES) {
-    const target = new THREE.Vector3().lerpVectors(startTarget, endTarget, t);
-
-    // IK 解算（使用实际 rest direction，直接返回四元数）
+  // 对每个轨迹点进行 IK 解算，记录肩肘四元数
+  // 累计肘部穿透次数用于数据级验证日志
+  let elbowPenetrationCount = 0;
+  for (const point of trajectory) {
     const ik = solveArmQuaternions(
       shoulderSceneLocal,
-      target,
+      point.position,
       upperArmLen,
       forearmLen,
       side,
       upperRestDir,
       lowerRestDir,
+      bodyVolume,  // 传入用于肘部穿透检测
+      hipsDir,     // 传入用于肘引导方向动态化
     );
+
+    if (ik.elbowPenetrated) elbowPenetrationCount++;
 
     upperQuats.push(ik.upper.x, ik.upper.y, ik.upper.z, ik.upper.w);
     lowerQuats.push(ik.lower.x, ik.lower.y, ik.lower.z, ik.lower.w);
   }
 
+  // 数据级验证日志：汇总本 clip 的穿模修正统计（info 级别，便于浏览器控制台捕获）
+  log.info(
+    `[穿模统计] ${clipLabel} | side=${side} | 轨迹点=${trajectory.length} | 躯干穿入=${torsoHits} | 头部穿入=${headHits} | 肘部穿入=${elbowPenetrationCount}`,
+  );
+
+  // 掌向修正四元数（常量，不随轨迹点变化）
+  const palmQuat = applyPalmOrientation(palmOrientation, side);
+  const handQuats: number[] = [];
+  for (let i = 0; i < trajectory.length; i++) {
+    handQuats.push(palmQuat.x, palmQuat.y, palmQuat.z, palmQuat.w);
+  }
+
   return [
     new THREE.QuaternionKeyframeTrack(buildTrackName(upperNode), times, upperQuats),
     new THREE.QuaternionKeyframeTrack(buildTrackName(lowerNode), times, lowerQuats),
+    new THREE.QuaternionKeyframeTrack(buildTrackName(handNode), times, handQuats),
   ];
 }
 
@@ -469,9 +762,10 @@ function buildFingerTracks(
  * 轨道名格式：expressionManager.<preset>（如 expressionManager.happy）
  * 表情在整个词汇期间保持目标值，由 VRMAnimator 的 fadeIn/fadeOut 处理过渡
  *
- * 注意：Task 4 需要在 scene 中添加名为 'expressionManager' 的代理 Object3D，
- * 并为其添加 preset 属性（getter/setter 转发到 vrm.expressionManager.setValue），
- * 否则 AnimationMixer 无法解析此轨道。
+ * 代理 Object3D 已在 VRMAnimator 构造函数中创建并添加到 vrm.scene：
+ * 名为 'expressionManager'，对每个预设定 getter/setter 转发到
+ * vrm.expressionManager.setValue/getValue，使 AnimationMixer 的 PropertyBinding
+ * 能正确解析 'expressionManager.<preset>' 轨道名。
  */
 function buildExpressionTrack(
   expression: FacialExpression,
@@ -517,6 +811,11 @@ export class ClipBuilder {
    * @returns THREE.AnimationClip，包含肩、肘、手指、表情轨道
    */
   static buildClip(gloss: SignGloss, vrm: VRM): THREE.AnimationClip {
+    // 初始化本 clip 的 VRMC 约束状态：从全局缓存读取约束映射，重置命中/回退计数
+    currentVRMConstraints = getVRMConstraintCache(vrm);
+    vrmcHitCount = 0;
+    vrmcFallbackCount = 0;
+
     const m = gloss.manual;
     const dominant = m.dominant_hand;
     const shapeStart = parseHandShape(m.handshape_start);
@@ -526,11 +825,7 @@ export class ClipBuilder {
 
     // 起止位置（相对 hips 的偏移）
     const startOffset = getLocationOffset(locStart, dominant);
-    let endOffset = getLocationOffset(locEnd, dominant);
-    // 起止位置相同且 movement 非静态时，根据 movement 方向施加偏移
-    if (locStart === locEnd && m.movement !== Movement.STATIC) {
-      endOffset = applyMovementOffset(endOffset, m.movement);
-    }
+    const endOffset = getLocationOffset(locEnd, dominant);
 
     // 动画时长（秒）
     const durationMs = gloss.duration_ms > 0 ? gloss.duration_ms : DEFAULT_DURATION_MS;
@@ -551,9 +846,10 @@ export class ClipBuilder {
     // 生成轨道
     const tracks: THREE.KeyframeTrack[] = [];
 
-    // 1. 主导手手臂轨道（肩 + 肘）
+    // 1. 主导手手臂轨道（肩 + 肘 + 手腕）
     const domArmTracks = buildArmTracks(
       vrm, dominant, startOffset, endOffset, durationSec, hipsSceneLocal, scale,
+      m.movement as Movement, parsePalmOrientation(m.palm_orientation), gloss.gloss_id,
     );
     tracks.push(...domArmTracks);
 
@@ -569,6 +865,7 @@ export class ClipBuilder {
       const mirrorEnd = { x: -endOffset.x, y: endOffset.y, z: endOffset.z };
       const nonDomArmTracks = buildArmTracks(
         vrm, nonDominant, mirrorStart, mirrorEnd, durationSec, hipsSceneLocal, scale,
+        m.movement as Movement, parsePalmOrientation(m.palm_orientation), gloss.gloss_id,
       );
       tracks.push(...nonDomArmTracks);
       const nonDomFingerTracks = buildFingerTracks(vrm, nonDominant, shapeStart, shapeEnd, durationSec);
@@ -595,6 +892,10 @@ export class ClipBuilder {
       dominant,
       isTwoHanded: m.is_two_handed,
     });
+    // VRMC 约束统计：命中数表示成功应用 roll 分布的采样点数，回退数为跳过的采样点数
+    log.info(
+      `[VRMC约束] ${gloss.gloss_id} | 命中=${vrmcHitCount} | 回退=${vrmcFallbackCount} | 总约束数=${currentVRMConstraints.size}`,
+    );
     return clip;
   }
 }

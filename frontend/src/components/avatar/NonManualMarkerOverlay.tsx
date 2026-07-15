@@ -23,6 +23,10 @@ const HEAD_MOVEMENT_CONFIG: Record<HeadMovement, { icon: string; label: string; 
   [HeadMovement.SHAKE]: { icon: '↔️', label: '摇头', animClass: 'animate-shake' },
   [HeadMovement.TILT_LEFT]: { icon: '↪️', label: '左歪头', animClass: 'animate-tilt-left' },
   [HeadMovement.TILT_RIGHT]: { icon: '↩️', label: '右歪头', animClass: 'animate-tilt-right' },
+  // 疑问倾斜：用于疑问词的通用头部倾斜
+  [HeadMovement.TILT]: { icon: '↪️', label: '歪头', animClass: 'animate-tilt-left' },
+  // 微微鞠躬：用于歉意表达
+  [HeadMovement.SLIGHT_BOW]: { icon: '🙇', label: '微鞠躬', animClass: 'animate-slight-nod' },
 };
 
 /** NonManualMarkerOverlay Props */

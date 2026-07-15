@@ -12,15 +12,15 @@ const PRONOUNS = new Set([
 /** 常用动词列表 */
 const VERBS = new Set([
   '是', '有', '想', '要', '去', '来', '看', '听', '说', '做', '吃', '喝',
-  '走', '跑', '坐', '站', '睡', '写', '读', '学', '教', '买', '卖', '给',
+  '走', '跑', '坐', '站', '睡', '写', '读', '学', '教', '买', '卖', '给', '过',
   '爱', '喜欢', '知道', '认识', '会', '能', '可以', '应该',
 ]);
 
 /** 量词列表 */
 const CLASSIFIERS = new Set(['个', '只', '条', '本', '张', '件', '辆', '座', '位', '头', '匹', '棵']);
 
-/** 语气词列表 */
-const PARTICLES = new Set(['吗', '呢', '吧', '啊', '呀', '哦', '啦', '嘛', '哟', '哇']);
+/** 语气词列表（含时态助词"了/着/过"） */
+const PARTICLES = new Set(['吗', '呢', '吧', '啊', '呀', '哦', '啦', '嘛', '哟', '哇', '了', '着', '过']);
 
 /** 介词列表 */
 const PREPOSITIONS = new Set(['在', '到', '从', '给', '对', '向', '为', '被', '把', '比']);
@@ -33,6 +33,12 @@ const QUESTION_WORDS = new Set(['什么', '哪里', '哪儿', '谁', '怎么', '
 
 /** 强调词列表 */
 const EMPHASIS_WORDS = new Set(['很', '非常', '太', '特别', '十分', '极其', '尤其', '更', '最']);
+
+/** 常用名词列表 */
+const NOUNS = new Set([
+  '饭', '菜', '水', '东西', '地方', '书', '车', '家', '学校', '工作',
+  '时间', '事情', '朋友', '老师', '学生', '爸爸', '妈妈', '孩子',
+]);
 
 /** 标点符号集合（分词时作为分隔符） */
 const PUNCTUATIONS = new Set([
@@ -50,13 +56,15 @@ export class PosTagger {
   tagWord(word: string, category?: string): string {
     // 优先按预定义词表判断
     if (PRONOUNS.has(word)) return 'r';
+    // 助词优先于动词（"了/着/过"作时态助词时标注为 'u'）
+    if (PARTICLES.has(word)) return 'u';
     if (VERBS.has(word)) return 'v';
     if (CLASSIFIERS.has(word)) return 'q';
-    if (PARTICLES.has(word)) return 'u';
     if (PREPOSITIONS.has(word)) return 'p';
     if (NEGATIONS.has(word)) return 'neg';
     if (QUESTION_WORDS.has(word)) return 'qst';
     if (EMPHASIS_WORDS.has(word)) return 'emph';
+    if (NOUNS.has(word)) return 'n';
     // 若提供词汇分类，按分类推断
     if (category) {
       const cat = category.toLowerCase();
@@ -190,7 +198,8 @@ export class Tokenizer {
       PREPOSITIONS.has(word) ||
       NEGATIONS.has(word) ||
       QUESTION_WORDS.has(word) ||
-      EMPHASIS_WORDS.has(word)
+      EMPHASIS_WORDS.has(word) ||
+      NOUNS.has(word)
     );
   }
 }
