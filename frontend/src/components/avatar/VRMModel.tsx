@@ -24,7 +24,7 @@ import { useRef, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { VRMLoaderPlugin, type VRM } from '@pixiv/three-vrm';
+import { VRMLoaderPlugin, VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
 import { VRMAnimator } from '@/modules/avatar/VRMAnimator';
 import { VRMAdapter } from '@/modules/avatar/VRMAdapter';
 import { RealtimePoseDriver } from '@/modules/avatar/RealtimePoseDriver';
@@ -60,6 +60,52 @@ function loadVRMCached(url: string): Promise<VRM> {
   });
   vrmLoadCache.set(url, promise);
   return promise;
+}
+
+/**
+ * 设置 VRM 上肢自然下垂姿态，覆盖默认绑定姿态（T-pose 双臂平举）。
+ * 必须使用 getNormalizedBoneNode 获取骨骼，否则 vrm.update() 会覆盖手动设置的旋转。
+ * 旋转值为保守初始值，实际角度需要在浏览器中根据模型坐标系微调。
+ */
+function setNeutralPose(vrm: VRM, logFlag = false): void {
+  // 上臂：自然下垂（X -1.2 ≈ -69°，接近人手自然下垂角度）+ 贴向身体（Z ±0.15）
+  // VRM 约定：上臂局部 X 轴沿手臂方向，X 负值让手臂向前下挥
+  const upperArmSpec: Array<[VRMHumanBoneName, THREE.Euler]> = [
+    [VRMHumanBoneName.LeftUpperArm,  new THREE.Euler(-1.2,  0, -0.15, 'XYZ')],
+    [VRMHumanBoneName.RightUpperArm, new THREE.Euler(-1.2,  0,  0.15, 'XYZ')],
+  ];
+  // 下臂：肘部微屈（X 0.30）让手肘自然向前
+  const lowerArmSpec: Array<[VRMHumanBoneName, THREE.Euler]> = [
+    [VRMHumanBoneName.LeftLowerArm,  new THREE.Euler( 0.30,  0,  0,    'XYZ')],
+    [VRMHumanBoneName.RightLowerArm, new THREE.Euler( 0.30,  0,  0,    'XYZ')],
+  ];
+
+  let applied = 0;
+  let missing = 0;
+  let typeErrors = 0;
+  for (const [name, euler] of [...upperArmSpec, ...lowerArmSpec]) {
+    const bone = vrm.humanoid.getNormalizedBoneNode(name) as any;
+    if (!bone) { missing++; continue; }
+    try {
+      if (bone.quaternion && typeof bone.quaternion.setFromEuler === 'function') {
+        bone.quaternion.setFromEuler(euler);
+      } else if (bone.rotation && typeof bone.rotation.setFromEuler === 'function') {
+        bone.rotation.setFromEuler(euler);
+      } else {
+        typeErrors++;
+        continue;
+      }
+      applied++;
+    } catch (e) {
+      typeErrors++;
+    }
+  }
+  // 立即更新世界矩阵，使设置后的姿态在下一帧渲染前生效
+  vrm.scene.updateMatrixWorld(true);
+
+  if (logFlag) {
+    log.info('setNeutralPose 完成', { applied, missing, typeErrors });
+  }
 }
 
 /** VRMModel Props */
@@ -159,6 +205,14 @@ export function VRMModel({
         // 此 VRM 模型本身面朝 +Z（右臂在 -X，非标准 VRM），已朝向相机，无需旋转
         // VRM hips 通常在 y=0 附近，偏移对齐舞台
         vrm.scene.position.y = -0.9;
+
+        // 覆盖默认绑定姿态（T-pose），设置自然下垂中立姿态
+        // 失败不应中断 VRM 加载流程——回退到原始 T-pose 也比没模型好
+        try {
+          setNeutralPose(vrm, true);
+        } catch (poseErr) {
+          log.warn('setNeutralPose 失败，使用默认 T-pose', { error: String(poseErr) });
+        }
 
         if (groupRef.current) {
           groupRef.current.add(vrm.scene);

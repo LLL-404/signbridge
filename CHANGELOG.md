@@ -48,6 +48,7 @@
 - fix(avatar): VRMModel 新增模块级 loadVRMCached 缓存加载 Promise，修复 React StrictMode 双重渲染导致 VRM 模型加载 ERR_ABORTED 错误
 - fix(ui): 移除 Google Fonts 引用改用系统字体栈（global.css/tailwind.config.js），并同步更新 index.html CSP，修复 fonts.googleapis.com 加载失败（ERR_ABORTED）错误
 - fix(data): 规范化 24 个现有词汇的字段值，统一使用合法枚举值（handshape/movement/location/expression/palm_orientation）
+- fix(avatar): 修复 VRM 初始 T-pose 问题——VRMModel 加载完成后调用 setNeutralPose 将上肢从默认 T-pose（双臂平举）调整为自然下垂姿态（上臂 X 轴 -1.2 rad ≈ -69°，肘部微屈 0.30 rad），并使用 getNormalizedBoneNode 防止 vrm.update() 覆盖旋转；setNeutralPose 用 try-catch 隔离，失败时回退到原始 T-pose 不影响 VRM 加载
 - fix(avatar): 修复 NonManualMarkerOverlay 缺少 TILT/SLIGHT_BOW 枚举处理导致的类型错误
 - fix(avatar): 移除 AvatarDriver 未使用的 Movement 导入
 - fix(avatar): 移除 ClipBuilder 未使用的 getBoneLength 函数
