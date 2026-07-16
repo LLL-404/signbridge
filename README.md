@@ -126,6 +126,7 @@ signbridge/
 
 - `frontend/` — 完整前端应用（React + TypeScript + Vite）
 - `docs/CODE_WIKI.md` — 代码知识库
+- `docs/COMPETITION_REGISTRATION_GUIDE.md` — 大赛报名指南
 - `docs/DEMO_SCRIPT.md` — 演示脚本
 - `docs/DEPLOY_GUIDE.md` — 部署指南
 - `docs/PRESENTATION_OUTLINE.md` — 演讲大纲
@@ -137,7 +138,11 @@ signbridge/
 
 - **大赛：** TRAE AI 创造力大赛
 - **赛道：** 社会服务赛道
-- **阶段：** 报名阶段（2026.6.16 - 7.15）
+- **阶段：** 初赛 Demo 已提交（2026.7.15）
+- **报名帖：** https://forum.trae.cn/t/topic/25741
+- **Demo 帖：** https://forum.trae.cn/t/topic/167826
+- **Demo 体验：** https://LLL-404.github.io/signbridge/
+- **GitHub 仓库：** https://github.com/LLL-404/signbridge
 
 ---
 

@@ -13,12 +13,23 @@ import type { SignGloss } from '@/types/sign';
 import { HandLocation, HandShape, FacialExpression, Movement, PalmOrientation } from '@/types/sign';
 import type { Vec3 } from '@/types/avatar';
 import { getHandShapeDefinition } from './HandShape';
+import { solveFABRIK } from './IKSolver';
 import { computeHingeAxis, constrainHingeJoint, constrainShoulderByDirection, constrainForearmRotation, applyVRMCConstraints, getVRMConstraintCache, type VRMConstraintMap } from './JointLimits';
 import { buildBodyVolume, isInsideTorso, isInsideHead, projectToSurface, type BodyVolume } from './BodyVolume';
 import { parseHandShape, parseHandLocation, parseFacialExpression, parsePalmOrientation } from './EnumParser';
 import { logger } from '@/modules/debug/logger';
 
 const log = logger.module('ClipBuilder');
+
+// ===== IK 求解路径配置 =====
+// 'analytic'（默认）：使用 solveArmQuaternions 内置的解析法（余弦定理）
+// 'fabrik'：使用 IKSolver.solveFABRIK 迭代求解器
+// 'constraint'：FABRIK + VRMC_node_constraint 后处理（VRMC 应用需解析法中间变量，
+//               当前简化为与 'fabrik' 行为一致，未复用解析法末尾的 VRMC 步骤8）
+// 后续可改为 import.meta.env.VITE_IK_MODE 读取，实现运行时切换
+type IKMode = 'analytic' | 'fabrik' | 'constraint';
+
+const IK_MODE: IKMode = 'analytic';
 
 // ===== 标准人体比例（与 AvatarDriver VRM_LOCATION_OFFSETS 一致）=====
 const STANDARD_SHOULDER_Y = 0.50;
@@ -409,6 +420,59 @@ function solveArmQuaternions(
   bodyVolume?: BodyVolume,
   hipsDir?: THREE.Vector3,
 ): { upper: THREE.Quaternion; lower: THREE.Quaternion; elbowPenetrated: boolean } {
+  // ===== IK_MODE 分发：FABRIK 模式调用 solveFABRIK，转四元数后提前返回 =====
+  // 'fabrik' 与 'constraint' 当前行为一致：FABRIK 求解后不再走解析法的 VRMC 步骤8，
+  // 因 VRMC 应用依赖解析法中间变量（upperRestDir/elbowPos/forearmLocalDir 等）
+  if (IK_MODE === 'fabrik' || IK_MODE === 'constraint') {
+    // 肘引导方向：基于 hipsDir 与 upperRestDir 推导，与解析法步骤2 中 reference 一致
+    const elbowHint = new THREE.Vector3(
+      (hipsDir?.x ?? 0) + upperRestDir.x * 0.6,
+      hipsDir?.y ?? -1,
+      (hipsDir?.z ?? 0) + 0.6,
+    ).normalize();
+
+    const fabrikResult = solveFABRIK(
+      { x: shoulderPos.x, y: shoulderPos.y, z: shoulderPos.z },
+      { x: wristTarget.x, y: wristTarget.y, z: wristTarget.z },
+      upperLen,
+      lowerLen,
+      side,
+      elbowHint,
+      10, // iterations
+    );
+
+    // IKResult（欧拉角 XYZ）→ 四元数
+    const upperQuatFabrik = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        fabrikResult.shoulderRotation.x,
+        fabrikResult.shoulderRotation.y,
+        fabrikResult.shoulderRotation.z,
+        'XYZ',
+      ),
+    );
+    const lowerQuatFabrik = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        fabrikResult.elbowRotation.x,
+        fabrikResult.elbowRotation.y,
+        fabrikResult.elbowRotation.z,
+        'XYZ',
+      ),
+    );
+
+    // 肘部穿透检测（与解析法步骤5 一致）：上臂端点 = shoulderPos + upperRestDir 旋转后 × upperLen
+    const elbowPosFabrik = shoulderPos.clone().add(
+      upperRestDir.clone().applyQuaternion(upperQuatFabrik).multiplyScalar(upperLen),
+    );
+    const elbowPenetratedFabrik = !!(bodyVolume && isInsideTorso(elbowPosFabrik, bodyVolume));
+
+    return {
+      upper: upperQuatFabrik,
+      lower: lowerQuatFabrik,
+      elbowPenetrated: elbowPenetratedFabrik,
+    };
+  }
+
+  // === 以下为原解析法逻辑（IK_MODE='analytic' 时执行） ===
   const S = shoulderPos.clone();
   const W = wristTarget.clone();
   const L1 = upperLen;

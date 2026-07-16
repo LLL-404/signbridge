@@ -1,0 +1,8 @@
+- [x] Checkpoint 1: `docs/COMPETITION_REGISTRATION_GUIDE.md` 文件已创建
+- [x] Checkpoint 2: 文档包含八大部分（报名流程、报名帖模板、创意产物生成、审核标准、奖励领取、报名结果查询、FAQ、后续步骤）
+- [x] Checkpoint 3: 重要链接完整保留（手把手教程、FAQ、抖音入口、赛事细则、官网、公示）
+- [x] Checkpoint 4: 时间信息完整（报名时间 6.16-7.15）
+- [x] Checkpoint 5: 奖励信息完整（速通 Pro 月卡、决赛门票）
+- [x] Checkpoint 6: Markdown 格式规范，语法正确
+- [x] Checkpoint 7: README.md 中已添加文档引用链接
+- [x] Checkpoint 8: 文档内容无用户评论干扰，仅保留官方报名指南

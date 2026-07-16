@@ -18,11 +18,11 @@
   - [x] SubTask 1.3: 添加 fallback 逻辑：FABRIK 失败时回退到解析法 `solve`
   - [x] SubTask 1.4: 编写单元测试验证 FABRIK 收敛性（误差 ≤ 1e-3 米，迭代 ≤ 10 次）
 
-- [ ] Task 2: 集成 VRMC_node_constraint 规范
-  - [ ] SubTask 2.1: 在 `JointLimits.ts` 新增 `applyVRMCConstraints` 函数，读取 VRM 节点的 roll/aim/rotation 约束
-  - [ ] SubTask 2.2: 在 VRMModel.tsx 加载阶段提取约束并存入缓存（WeakMap<VRM, NodeConstraintMap>）
-  - [ ] SubTask 2.3: 在 ClipBuilder.ts 的 `solveArmQuaternions` 末尾调用 `applyVRMCConstraints`，无约束时回退到现有 JointLimits
-  - [ ] SubTask 2.4: 添加日志：约束命中/回退统计（info 级别，便于数据级验证）
+- [x] Task 2: 集成 VRMC_node_constraint 规范
+  - [x] SubTask 2.1: 在 `JointLimits.ts` 新增 `applyVRMCConstraints` 函数，读取 VRM 节点的 roll/aim/rotation 约束
+  - [x] SubTask 2.2: 在 VRMModel.tsx 加载阶段提取约束并存入缓存（WeakMap<VRM, NodeConstraintMap>）
+  - [x] SubTask 2.3: 在 ClipBuilder.ts 的 `solveArmQuaternions` 末尾调用 `applyVRMCConstraints`，无约束时回退到现有 JointLimits
+  - [x] SubTask 2.4: 添加日志：约束命中/回退统计（info 级别，便于数据级验证）
 
 - [x] Task 3: 实现 Mixamo 动画重定向
   - [x] SubTask 3.1: 新增 `MixamoRetargeter.ts`，定义 MIXAMO_VRM_RIG_MAP 骨骼映射表
@@ -31,16 +31,16 @@
   - [x] SubTask 3.4: 在 AvatarDriver 添加 `playRetargetedAnimation(url)` 方法，支持加载远程 FBX 并播放
   - [x] SubTask 3.5: 添加穿模检测：重定向动画播放时输出 `[穿模统计]` 日志
 
-- [ ] Task 4: ClipBuilder IK 路径选择
-  - [ ] SubTask 4.1: 在 ClipBuilder.ts 顶部添加 `IK_MODE` 配置常量（'analytic' | 'fabrik' | 'constraint'）
-  - [ ] SubTask 4.2: 修改 `solveArmQuaternions`，根据 IK_MODE 分发到对应求解路径
-  - [ ] SubTask 4.3: 默认 IK_MODE='analytic'，确保现有行为不变
+- [x] Task 4: ClipBuilder IK 路径选择
+  - [x] SubTask 4.1: 在 ClipBuilder.ts 顶部添加 `IK_MODE` 配置常量（'analytic' | 'fabrik' | 'constraint'）
+  - [x] SubTask 4.2: 修改 `solveArmQuaternions`，根据 IK_MODE 分发到对应求解路径
+  - [x] SubTask 4.3: 默认 IK_MODE='analytic'，确保现有行为不变
 
-- [ ] Task 5: 验证与文档
-  - [ ] SubTask 5.1: 运行 tsc 与 eslint，确保 0 errors/warnings
+- [x] Task 5: 验证与文档
+  - [x] SubTask 5.1: 运行 tsc 与 eslint，确保 0 errors/warnings
   - [ ] SubTask 5.2: 在浏览器中验证 "你好"、"朋友"、"吃饭"、"过来" 四个词汇在三种 IK_MODE 下的穿模统计数据（躯干/头部/肘部穿入均为 0）
   - [ ] SubTask 5.3: 验证 Mixamo 重定向动画播放正常，无穿模
-  - [ ] SubTask 5.4: 更新 CHANGELOG.md 的 [Unreleased] 段，添加 feat(perf) 条目
+  - [x] SubTask 5.4: 更新 CHANGELOG.md 的 [Unreleased] 段，添加 feat(perf) 条目
 
 # Task Dependencies
 

@@ -26,6 +26,19 @@
 - feat(data): 新增 SignLanguageRules.ts 手语动作规律规则，包含手形/位置/运动/表情 4 张语义映射表和 6 类参数组合模板
 - feat(data): 新增 validateVocabulary.ts 词汇数据校验工具，开发环境启动时自动校验枚举合法性
 - feat(types): HandShape 枚举新增 HOOK 手形，Movement 新增 7 个运动值，HeadMovement 新增 TILT/SLIGHT_BOW
+- feat(avatar): 新增 FABRIK IK 求解器作为解析法的可选替代，支持多链协同与多目标约束
+  - `IKSolver.ts` 新增 `solveFABRIK`、`solveFABRIKMultiChain` 函数
+  - 失败时自动 fallback 到解析法 `solve`
+  - 误差 ≤ 1e-3 米，迭代 ≤ 10 次
+- feat(avatar): 集成 VRM 1.0 VRMC_node_constraint 规范，优先使用模型内置约束（roll/aim/rotation）
+  - `JointLimits.ts` 新增 `applyVRMCConstraints`、`extractVRMCConstraints` 函数
+  - VRMModel.tsx 加载阶段提取约束并存入 WeakMap 缓存
+  - 无约束模型回退到现有 JointLimits 手动约束
+- feat(avatar): 新增 Mixamo 动画重定向支持，可加载预录制 FBX 动画播放
+  - 新增 `MixamoRetargeter.ts` 实现 MIXAMO_VRM_RIG_MAP 骨骼映射
+  - `AvatarDriver` 新增 `playRetargetedAnimation(url)` 方法
+  - 动态 import FBXLoader 避免首屏包体积增加
+- feat(avatar): ClipBuilder 新增 IK_MODE 配置（'analytic' | 'fabrik' | 'constraint'），默认 'analytic' 保持现有行为不变
 
 ### 🔧 修复
 - fix(grammar): 时态助词"了/着/过"不再作为未匹配词——GlossMapper 对 pos='u' 的 token 静默跳过（其语义由 NonManualMarker 承载），PosTagger 将 PARTICLES 检查提前到 VERBS 之前使"了/着/过"标注为助词而非动词
@@ -41,6 +54,7 @@
 - fix(avatar): 放宽 Skeleton3D 的 FINGER_LENGTHS 类型为 number[] 修复元组类型不匹配
 
 ### 📦 维护
+- chore(competition): 提交 TRAE AI 创造力大赛初赛 Demo 帖（https://forum.trae.cn/t/topic/167826），发布报名帖（https://forum.trae.cn/t/topic/167778），README.md 参赛信息更新为"初赛 Demo 已提交"，补充 GitHub Pages 体验地址（https://LLL-404.github.io/signbridge/）与仓库地址
 - chore: 迁移文档到 docs/ 目录
 - chore: 清理测试文件和临时资源
 - chore(ci): 升级 GitHub Actions Node.js 版本从 20 到 24，修复部署失败
