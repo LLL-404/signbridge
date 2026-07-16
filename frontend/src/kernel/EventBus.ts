@@ -4,9 +4,11 @@
  */
 
 import type { EventHandler } from './types';
-import { logger } from '@/modules/debug/logger';
 
-const log = logger.module('EventBus');
+// kernel保持独立，不依赖debug模块
+const log = {
+  error: (msg: string, ...args: unknown[]) => console.error(`[EventBus] ${msg}`, ...args),
+};
 
 class EventBus {
   private handlers = new Map<string, Set<EventHandler>>();

@@ -16,12 +16,15 @@ import type {
   EventHandler,
 } from './types';
 import { eventBus } from './EventBus';
-import { logger } from '@/modules/debug/logger';
 
 /** 内核版本 */
 const KERNEL_VERSION = '1.0.0';
 
-const log = logger.module('PluginManager');
+// kernel保持独立，不依赖debug模块
+const log = {
+  warn: (msg: string, ...args: unknown[]) => console.warn(`[PluginManager] ${msg}`, ...args),
+  error: (msg: string, ...args: unknown[]) => console.error(`[PluginManager] ${msg}`, ...args),
+};
 
 class PluginManager {
   /** 已注册的插件工厂（未实例化） */
