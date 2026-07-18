@@ -9,8 +9,17 @@
 ## [Unreleased]
 
 ### ✨ 新增
+- feat(test): 补全 6 个核心模块单元测试，新增 134 个测试用例（JointLimits 36 个、KalidokitSolver 16 个、MixamoRetargeter 14 个、DataCollector 32 个、ModelTrainer 12 个、TrainingDataGenerator 24 个）；单元测试总数从 675 提升至 809，全部通过；通过 vi.mock 隔离 Three.js/TF.js/VRM/IndexedDB/Worker 等外部依赖
+- feat(pwa): PWA 离线支持——使用 vite-plugin-pwa 配置 manifest（name='手语桥 SignBridge'）、service worker（generateSW 模式）、runtime caching 策略（VRM 模型 CacheFirst 30 天、vocabulary.json NetworkFirst 7 天、CDN 资源 CacheFirst/StaleWhileRevalidate）；预缓存 35 个条目（4690 KiB）；新增 PWA 图标 192x192/512x512 PNG + 图标生成脚本；index.html 添加 apple-touch-icon 和 manifest 链接
+- feat(a11y): 可访问性增强——index.html 添加 `lang="zh-CN"` 和 description meta；Header/Sidebar/Layout 添加 ARIA 标签（aria-label、aria-controls、aria-expanded）、语义化结构（`<aside>`、`<nav>`、`<main>`）；4 个页面（VoiceToSign/SignToText/Dialogue/Learning）添加 aria-live 状态播报、role="status"/"alert"、aria-pressed、aria-valuemin/max/now；LearningPage 模式切换实现标准 ARIA tabs 模式（role="tablist"/"tab"/"tabpanel" + roving tabindex）；装饰性图标/emoji 添加 aria-hidden；Sidebar 抽屉支持 Escape 键关闭
+- feat(recognition): ST-GCN 手势识别模型训练完成——使用 @tensorflow/tfjs-node 原生 C++ 后端（oneDNN 优化 + AVX2 指令集）训练 100 epoch，训练准确率 87.94%，验证集准确率 88.50%，独立测试集准确率 83.50%；模型文件 427.5 KB（model.json + weights.bin + labelMap.json）；STGCNRecognizer 三级回退加载（HTTP → IndexedDB → 未训练兜底）；训练脚本 `scripts/train-stgcn-model.mjs` 支持 CLI 参数（--lr、--batchSize、--epochs、--samples）
+- feat(e2e): 新增 10 个 E2E 测试用例（extended.spec.ts）——3D/2D 模式切换、学习模式评分 UI、VRM 加载失败降级、词汇接口失败兜底、Tab 键导航、Enter 键激活、Escape 键关闭抽屉、manifest 可访问性、index.html manifest 引用；E2E 测试总数从 14 提升至 24（23 passed + 1 skipped，PWA manifest 在 dev 模式下预期 skip）
+- feat(error): 异常处理增强——ErrorBoundary 新增 errorId 标识和"刷新页面"按钮，生产环境隐藏技术细节；VRMModel 新增 onLoadError 回调，加载失败时清除缓存允许重试；Avatar3D 在 Canvas 上层叠加错误提示条（role="alert"）；AvatarCanvas VRM 加载失败自动降级到 2D 模式；DataInitializer 新增 fetchWithRetry 函数（最多 3 次指数退避重试，仅对网络异常和 5xx 重试）
 - feat(perf): PerformancePanel 新增首屏包体积指标展示——usePerformanceMonitor 通过 PerformanceObserver 监听 `resource` 类型条目，过滤 `.js`/`.css` 资源汇总 chunk 总大小/数量/加载时间；PerformancePanel 复用 MetricItem 组件新增"包体积"区块（阈值：chunk 总大小 500/1000 KB，chunk 数量 20/50 个，加载时间 1500/3000 ms），3 秒后自动 disconnect 避免长期占用
 - feat(avatar): AvatarDriver 新增穿模检测 hook——`update()` 中调用 `checkPenetration()`，通过 normalized bone API 获取手腕世界位置与 hips 位置比较（`|hand.x - hips.x| < 0.15 && |hand.z - hips.z| < 0.12`），穿入躯干时输出 `log.warn('[穿模检测] 手腕穿入躯干', { hand, position })`；单侧日志限流 3 次避免刷屏，仅在 `playRetargetedAnimation` 播放期间检测；复用 `_tmp*Pos: THREE.Vector3` 实例避免 GC 压力
+
+### 🔧 修复
+- fix(stgcn): GraphConvLayer.call() 梯度计算修复——TF.js 4.22.0 中 3D×2D BatchMatMul 梯度形状不匹配、Einsum op 无梯度函数；改用 2D matMul + reshape/transpose 链（X@W 展平为 (B*F*N, inCh)×(inCh, outCh)，A@XW 转置让 N 成首维）；邻接矩阵缓存改为纯 number[][] 数据避免跨 tf.tidy scope 引用导致的 moveData backend 错误
 
 ### ⚡ 性能
 - perf: VRM 模型懒加载验证通过——`Avatar3D.tsx` 使用 `LazyVRMModel = lazy(() => import('./VRMModel'))` 异步加载，首屏不请求 10.7MB 的 `models/avatar.vrm` 文件，仅当导航到 `/voice-to-sign` 等使用 3D 化身的页面时才加载
@@ -20,6 +29,8 @@
 - fix(e2e): 修复 E2E 测试超时失败（2/14 → 14/14 通过）——「应能导航到各功能页面」和「应显示双面板布局」测试默认 30s 超时不足，提升至 `test.setTimeout(60000)`，导航改用 `waitUntil: 'domcontentloaded'`，缩短中间步骤 `waitForTimeout`，添加 `page.locator('body').waitFor({ state: 'attached', timeout: 30000 })` 等待页面就绪
 
 ### 📦 维护
+- chore(deps): 新增 `@tensorflow/tfjs-node@4.22.0` 作为 devDependency，仅用于 Node.js 环境训练 ST-GCN 模型（原生 C++ 后端，oneDNN 优化 + AVX2 指令集）；vite.config.ts 配置 `optimizeDeps.exclude: ['@tensorflow/tfjs-node']` 确保不进入浏览器生产 bundle
+- chore: `frontend/.gitignore` 新增 tfjs-node 构建缓存忽略规则（`.cache/`）
 - chore(ci): CI 流水线新增 E2E 测试步骤——在单元测试后添加 `npx playwright install chromium --with-deps` 安装浏览器、`npx playwright test` 执行测试、`actions/upload-artifact@v4` 上传 `playwright-report`（保留 7 天，`if: ${{ !cancelled() }}` 确保失败时也上传）
 - chore: `frontend/.gitignore` 新增 Playwright 测试产物忽略规则（`test-results/`、`playwright-report/`），避免测试报告被误提交
 - chore: `frontend/.gitignore` 新增 Lighthouse 审计产物忽略规则（`lighthouse-result.json`），该文件含 localhost URL/fetchTime/user agent 等环境相关数据，属可再生构建产物

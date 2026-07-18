@@ -278,7 +278,7 @@ export function VoiceToSignPage() {
           {/* 文本输入区域（手动输入中文文字 → 播放手语） */}
           <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '120ms' }}>
             <div className="mb-2 md:mb-3 flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
+              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" aria-hidden="true" />
               <h3 className="text-sm font-semibold text-content-primary">文本输入</h3>
             </div>
             <div className="flex gap-2">
@@ -289,26 +289,28 @@ export function VoiceToSignPage() {
                 onKeyDown={handleTextKeyDown}
                 disabled={isPlaying}
                 placeholder="输入中文文字，按回车播放手语"
+                aria-label="中文文字输入框，按回车键播放对应手语"
                 className="flex-1 rounded-lg border border-dark-600 bg-dark-900/50 px-3 py-2 text-sm md:text-base text-content-primary placeholder:text-content-muted focus:border-accent-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
               />
               <button
                 type="button"
                 onClick={handleTextInput}
                 disabled={isPlaying}
+                aria-label="播放输入文字对应的手语动作"
                 className="shrink-0 rounded-lg bg-accent-500 px-4 py-2 text-xs md:text-sm font-medium text-white transition-all hover:bg-accent-600 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 播放手语
               </button>
             </div>
-            {/* 管道状态指示器：仅在非空闲时显示 */}
+            {/* 管道状态指示器：role="status" + aria-live 让屏幕阅读器实时朗读状态变化 */}
             {pipelineStatus !== 'idle' && (
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-2 flex items-center gap-2" role="status" aria-live="polite">
                 <span className={`h-2 w-2 rounded-full ${
                   pipelineStatus === 'converting' ? 'bg-yellow-400 animate-pulse' :
                   pipelineStatus === 'playing' ? 'bg-green-400 animate-pulse' :
                   pipelineStatus === 'error' ? 'bg-red-400' :
                   'bg-blue-400 animate-pulse'
-                }`} />
+                }`} aria-hidden="true" />
                 <span className="text-xs text-content-secondary">
                   {pipelineStatus === 'loading' ? '加载数据中...' :
                    pipelineStatus === 'converting' ? '转换中...' :
@@ -322,10 +324,10 @@ export function VoiceToSignPage() {
           {/* 识别文字显示 */}
           <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '160ms' }}>
             <div className="mb-2 md:mb-3 flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
+              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" aria-hidden="true" />
               <h3 className="text-sm font-semibold text-content-primary">识别文字</h3>
             </div>
-            <div className="min-h-[56px] md:min-h-[64px] rounded-lg border border-dark-600 bg-dark-900/50 p-3">
+            <div className="min-h-[56px] md:min-h-[64px] rounded-lg border border-dark-600 bg-dark-900/50 p-3" aria-live="polite">
               {finalText || interimText ? (
                 <p className="text-sm md:text-base text-content-primary">
                   {finalText}
@@ -340,23 +342,23 @@ export function VoiceToSignPage() {
           {/* 手语词汇序列（语法引擎转换结果） */}
           <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '240ms' }}>
             <div className="mb-2 md:mb-3 flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
+              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" aria-hidden="true" />
               <h3 className="text-sm font-semibold text-content-primary">手语词汇序列</h3>
             </div>
             {convertError ? (
-              <p className="text-sm text-red-400">转换失败：{convertError}</p>
+              <p className="text-sm text-red-400" role="alert">转换失败：{convertError}</p>
             ) : glossItems.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
+              <ul className="flex flex-wrap gap-2" aria-label="手语词汇序列">
                 {glossItems.map((item, idx) => (
-                  <span
+                  <li
                     key={`${item.gloss_id}-${idx}`}
                     className="chip animate-fade-up text-xs md:text-sm"
                     style={{ animationDelay: `${idx * 40}ms` }}
                   >
                     {item.chinese}
-                  </span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             ) : (
               <p className="text-sm text-content-muted">尚未生成词汇序列</p>
             )}
@@ -389,20 +391,26 @@ export function VoiceToSignPage() {
             step={SPEED_STEP}
             value={playbackSpeed}
             onChange={handleSpeedChange}
+            aria-label="语速调节"
+            aria-valuemin={MIN_SPEED}
+            aria-valuemax={MAX_SPEED}
+            aria-valuenow={playbackSpeed}
             className="h-1.5 flex-1 w-24 md:w-32 cursor-pointer appearance-none rounded-full bg-dark-600 accent-accent-500"
           />
-          <span className="w-10 md:w-12 text-xs md:text-sm font-bold text-accent-300">
+          <span className="w-10 md:w-12 text-xs md:text-sm font-bold text-accent-300" aria-hidden="true">
             {playbackSpeed.toFixed(1)}x
           </span>
         </div>
 
-        {/* 3D / 2D 模式切换 */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs md:text-sm font-medium text-content-secondary whitespace-nowrap">模式</span>
+        {/* 3D / 2D 模式切换：使用 role="group" + aria-label 标识按钮组 */}
+        <div className="flex items-center gap-2" role="group" aria-label="虚拟人模式切换">
+          <span className="text-xs md:text-sm font-medium text-content-secondary whitespace-nowrap" aria-hidden="true">模式</span>
           <div className="flex">
             <button
               type="button"
               onClick={() => setMode('3d')}
+              aria-pressed={mode === '3d' ? 'true' : 'false'}
+              aria-label="使用 3D 虚拟人模式"
               className={`rounded-l-lg px-3 md:px-4 py-1.5 md:py-2 text-xs md:text-sm font-medium transition-all ${
                 mode === '3d'
                   ? 'bg-accent-500 text-white'
@@ -414,6 +422,8 @@ export function VoiceToSignPage() {
             <button
               type="button"
               onClick={() => setMode('2d')}
+              aria-pressed={mode === '2d' ? 'true' : 'false'}
+              aria-label="使用 2D 虚拟人模式"
               className={`rounded-r-lg px-3 md:px-4 py-1.5 md:py-2 text-xs md:text-sm font-medium transition-all ${
                 mode === '2d'
                   ? 'bg-accent-500 text-white'
@@ -431,11 +441,12 @@ export function VoiceToSignPage() {
             type="button"
             onClick={handleStop}
             disabled={!isPlaying}
+            aria-label="停止手语播放"
             className="flex-1 md:flex-none rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs md:text-sm font-medium text-red-400 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
             ⏹ 停止
           </button>
-          <span className={`text-xs md:text-sm whitespace-nowrap ${isPlaying ? 'text-accent-300' : 'text-content-muted'}`}>
+          <span className={`text-xs md:text-sm whitespace-nowrap ${isPlaying ? 'text-accent-300' : 'text-content-muted'}`} role="status" aria-live="polite">
             {isPlaying ? '● 播放中' : '○ 就绪'}
           </span>
         </div>

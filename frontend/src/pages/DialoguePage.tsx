@@ -273,19 +273,19 @@ export function DialoguePage() {
         icon="🔄"
       />
 
-      {/* 对话历史（顶部，全宽） */}
+      {/* 对话历史（顶部，全宽）：aria-live="polite" 让屏幕阅读器朗读新消息 */}
       <div className="card animate-fade-up p-4 md:p-5" style={{ animationDelay: '80ms' }}>
         <div className="mb-3 flex items-center gap-2">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
+          <span className="h-1.5 w-1.5 rounded-full bg-accent-400" aria-hidden="true" />
           <h3 className="text-sm font-semibold text-content-primary">对话历史</h3>
         </div>
-        <div className="max-h-[160px] overflow-y-auto md:max-h-[200px]">
+        <div className="max-h-[160px] overflow-y-auto md:max-h-[200px]" aria-live="polite" aria-label="对话历史">
           {messages.length === 0 ? (
             <p className="py-4 text-center text-sm text-content-muted">
               暂无对话记录，开始说话或打手语吧
             </p>
           ) : (
-            <ul className="flex flex-col gap-2">
+            <ul className="flex flex-col gap-2" aria-label="对话消息列表">
               {messages.map((msg) => (
                 <li
                   key={msg.id}
@@ -303,7 +303,7 @@ export function DialoguePage() {
                       <span>{msg.type === 'voice' ? '语音' : '手语'}</span>
                       <span>{new Date(msg.timestamp).toLocaleTimeString('zh-CN')}</span>
                       {msg.confidence !== undefined && (
-                        <span className="font-medium text-accent-300">
+                        <span className="font-medium text-accent-300" aria-label={`置信度 ${Math.round(msg.confidence * 100)}%`}>
                           {Math.round(msg.confidence * 100)}%
                         </span>
                       )}
@@ -317,12 +317,13 @@ export function DialoguePage() {
         </div>
       </div>
 
-      {/* 双面板：左健听人 / 右听障人 */}
+      {/* 双面板：左健听人 / 右听障人。使用 role="group" + aria-label 标识两个对话角色面板 */}
       <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-2">
         {/* 健听人面板：语音输入 + 虚拟人展示 */}
-        <div className="card animate-fade-up flex flex-col gap-3 p-4 md:gap-4 md:p-5" style={{ animationDelay: '160ms' }}>
+        <div className="card animate-fade-up flex flex-col gap-3 p-4 md:gap-4 md:p-5" style={{ animationDelay: '160ms' }} role="group" aria-label="健听人面板，语音输入转手语">
           <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-accent-500/30 bg-accent-500/15 text-lg">🎤</span>
+            {/* 装饰性 emoji 图标：aria-hidden 避免屏幕阅读器朗读 */}
+            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-accent-500/30 bg-accent-500/15 text-lg" aria-hidden="true">🎤</span>
             <h3 className="font-bold text-content-primary">健听人（语音）</h3>
           </div>
           <VoiceInput onText={handleVoiceText} placeholder="点击麦克风说话，将转为手语" />
@@ -334,13 +335,13 @@ export function DialoguePage() {
         </div>
 
         {/* 听障人面板：摄像头 + 识别结果 */}
-        <div className="card animate-fade-up flex flex-col gap-3 p-4 md:gap-4 md:p-5" style={{ animationDelay: '240ms' }}>
+        <div className="card animate-fade-up flex flex-col gap-3 p-4 md:gap-4 md:p-5" style={{ animationDelay: '240ms' }} role="group" aria-label="听障人面板，手语识别转文字">
           <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-cyan-500/30 bg-cyan-500/15 text-lg">👋</span>
+            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-cyan-500/30 bg-cyan-500/15 text-lg" aria-hidden="true">👋</span>
             <h3 className="font-bold text-content-primary">听障人（手语）</h3>
           </div>
           {modelLoading ? (
-            <div className="flex h-[200px] items-center justify-center text-content-muted">
+            <div className="flex h-[200px] items-center justify-center text-content-muted" role="status" aria-live="polite">
               模型加载中...
             </div>
           ) : (
@@ -353,7 +354,8 @@ export function DialoguePage() {
                   height="100%"
                 />
               </div>
-              <div className="rounded-lg border border-dark-600 bg-dark-900/40 p-3 text-center">
+              {/* 手语识别状态：role="status" 让屏幕阅读器朗读状态变化 */}
+              <div className="rounded-lg border border-dark-600 bg-dark-900/40 p-3 text-center" role="status" aria-live="polite">
                 <span className="text-xs md:text-sm text-content-secondary">
                   状态：{signStatus === 'idle' ? '等待启动' :
                     signStatus === 'waiting' ? '等待手部运动' :

@@ -20,6 +20,45 @@ interface VocabularyFile {
 let initStarted = false;
 let initPromise: Promise<void> | null = null;
 
+/** 网络重试最大次数（含首次请求） */
+const MAX_RETRY = 3;
+/** 重试基础延迟（毫秒），实际延迟为 base * 2^(attempt-1) */
+const RETRY_BASE_DELAY_MS = 500;
+
+/**
+ * 带重试的 fetch：网络错误或非 2xx 状态码时按指数退避重试
+ * 仅对网络层与 5xx 重试，4xx 不重试（客户端错误不可恢复）
+ */
+async function fetchWithRetry(url: string, maxAttempts: number): Promise<Response> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(url);
+      // 5xx 服务端错误：重试
+      if (response.status >= 500 && attempt < maxAttempts) {
+        log.warn(`词汇数据请求返回 ${response.status}，第 ${attempt} 次重试`, { url });
+        await delay(RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1));
+        continue;
+      }
+      return response;
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxAttempts) {
+        log.warn(`词汇数据请求异常，第 ${attempt} 次重试`, err);
+        await delay(RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1));
+        continue;
+      }
+    }
+  }
+  // 所有重试均失败，抛出最后一次错误
+  throw lastError ?? new Error('fetchWithRetry: unknown failure');
+}
+
+/** Promise 延迟辅助 */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * 初始化词汇数据
  * 性能优化策略：
@@ -54,7 +93,15 @@ async function doInitialize(): Promise<void> {
       return;
     }
 
-    const response = await fetch(VOCABULARY_JSON_URL);
+    // 网络请求带重试（最多 3 次），失败后由 VocabularyStore 内置常用词汇兜底
+    let response: Response;
+    try {
+      response = await fetchWithRetry(VOCABULARY_JSON_URL, MAX_RETRY);
+    } catch (err) {
+      log.warn('词汇数据网络请求失败（已重试），使用内置常用词汇', err);
+      return;
+    }
+
     if (!response.ok) {
       log.warn(`加载词汇数据失败：HTTP ${response.status}，使用内置常用词汇`);
       return;

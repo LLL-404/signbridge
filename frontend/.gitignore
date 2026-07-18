@@ -19,6 +19,9 @@ playwright-report/
 # Lighthouse 审计产物
 lighthouse-result.json
 
+# tfjs-node 原生模块构建缓存
+.cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

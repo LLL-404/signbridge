@@ -39,6 +39,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: [],
+      // 开发环境不启用 PWA，避免 Service Worker 与 HMR 冲突
+      devOptions: { enabled: false },
       manifest: {
         name: '手语桥 SignBridge',
         short_name: '手语桥',
@@ -49,24 +51,44 @@ export default defineConfig({
         scope: process.env.GITHUB_PAGES ? '/signbridge/' : '/',
         start_url: process.env.GITHUB_PAGES ? '/signbridge/' : '/',
         lang: 'zh-CN',
+        // 图标：PNG（兼容性更好）+ SVG（矢量缩放）双轨配置
         icons: [
+          {
+            src: 'pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
           {
             src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" rx="40" fill="%230a0a0f"/><text x="96" y="130" font-size="100" text-anchor="middle" fill="%233b82f6">✋</text></svg>',
             sizes: '192x192',
             type: 'image/svg+xml',
-            purpose: 'any maskable',
+            purpose: 'any',
           },
           {
             src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="100" fill="%230a0a0f"/><text x="256" y="350" font-size="260" text-anchor="middle" fill="%233b82f6">✋</text></svg>',
             sizes: '512x512',
             type: 'image/svg+xml',
-            purpose: 'any maskable',
+            purpose: 'any',
           },
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
-        globIgnores: ['**/data/vocabulary.json'],
+        // 预缓存资源类型：补充 woff2 字体与 vrm 模型
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,wasm}'],
+        globIgnores: ['**/data/vocabulary.json', '**/models/*.vrm'],
         navigateFallback: process.env.GITHUB_PAGES ? '/signbridge/index.html' : '/index.html',
         runtimeCaching: [
           {
@@ -86,6 +108,17 @@ export default defineConfig({
             },
           },
           {
+            // VRM 模型文件：大文件且不常变更，使用 CacheFirst 离线优先
+            urlPattern: /\.(?:vrm)$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'vrm-model-cache',
+              expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // 词汇 JSON：使用 NetworkFirst 保证数据新鲜度的同时支持离线降级
             urlPattern: /^.*\/data\/vocabulary\.json$/i,
             handler: 'NetworkFirst',
             options: {
@@ -102,6 +135,11 @@ export default defineConfig({
       // 路径别名：@ 指向 src 目录
       '@': path.resolve(__dirname, './src'),
     },
+  },
+  // tfjs-node 是 Node.js 原生模块（含 C++ 绑定），仅训练脚本使用
+  // 必须排除在浏览器构建之外：dev 服务器不预打包，生产构建不引入
+  optimizeDeps: {
+    exclude: ['@tensorflow/tfjs-node'],
   },
   server: {
     port: 5173,

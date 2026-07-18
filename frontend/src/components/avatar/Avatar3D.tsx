@@ -1,5 +1,5 @@
 // 3D 虚拟人 React 组件
-import { useRef, useMemo, useEffect, Suspense, type CSSProperties, lazy } from 'react';
+import { useRef, useMemo, useEffect, useState, Suspense, type CSSProperties, lazy } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -37,6 +37,8 @@ export interface Avatar3DProps {
   modelUrl?: string;
   /** VRM 模式加载完成回调，同时传递 VRM 和 VRMAnimator 实例 */
   onVRMLoaded?: (vrm: VRM, animator: VRMAnimator) => void;
+  /** VRM 模式加载失败回调，上层可据此降级到 2D 模式 */
+  onVRMLoadError?: (error: Error) => void;
 }
 
 /** 根据容器宽高比动态调整相机，确保模型在不同设备上显示一致 */
@@ -141,13 +143,15 @@ function VRMAvatarModel({
   vrmPose,
   modelUrl,
   onLoaded,
+  onLoadError,
 }: {
   pose: BonePose;
   vrmPose?: VRMPose;
   modelUrl?: string;
   onLoaded?: (vrm: VRM, animator: VRMAnimator) => void;
+  onLoadError?: (error: Error) => void;
 }) {
-  return <LazyVRMModel pose={pose} vrmPose={vrmPose} modelUrl={modelUrl} onLoaded={onLoaded} />;
+  return <LazyVRMModel pose={pose} vrmPose={vrmPose} modelUrl={modelUrl} onLoaded={onLoaded} onLoadError={onLoadError} />;
 }
 
 /** 3D 虚拟人组件 */
@@ -161,15 +165,30 @@ export default function Avatar3D({
   mode = 'vrm',
   modelUrl = `${import.meta.env.BASE_URL}models/avatar.vrm`,
   onVRMLoaded,
+  onVRMLoadError,
 }: Avatar3DProps) {
   const currentPose = pose ?? NEUTRAL_POSE;
+  // VRM 加载错误状态：用于在 Canvas 上层叠加错误提示
+  const [loadError, setLoadError] = useState<Error | null>(null);
 
   const mergedStyle: CSSProperties = { width, height, ...containerStyle };
+
+  // VRM 加载失败回调：记录错误并向上通知
+  const handleVRMLoadError = (error: Error) => {
+    setLoadError(error);
+    onVRMLoadError?.(error);
+  };
+
+  // VRM 加载成功时清除错误状态
+  const handleVRMLoaded = (vrm: VRM, animator: VRMAnimator) => {
+    setLoadError(null);
+    onVRMLoaded?.(vrm, animator);
+  };
 
   return (
     <div
       style={mergedStyle}
-      className={`rounded-2xl overflow-hidden bg-gradient-to-b from-dark-900 to-dark-950 ${className ?? ''}`}
+      className={`relative rounded-2xl overflow-hidden bg-gradient-to-b from-dark-900 to-dark-950 ${className ?? ''}`}
     >
       <Canvas
         shadows
@@ -214,7 +233,8 @@ export default function Avatar3D({
               pose={currentPose}
               vrmPose={vrmPose}
               modelUrl={modelUrl}
-              onLoaded={onVRMLoaded}
+              onLoaded={handleVRMLoaded}
+              onLoadError={handleVRMLoadError}
             />
           </Suspense>
         ) : (
@@ -231,6 +251,18 @@ export default function Avatar3D({
           enablePan={false}
         />
       </Canvas>
+
+      {/* VRM 加载失败时的友好错误提示（叠加在 Canvas 上层，避免页面整体崩溃） */}
+      {loadError && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-2 bg-red-500/20 px-3 py-2 text-xs text-red-200 backdrop-blur-sm"
+        >
+          <span aria-hidden="true">⚠️</span>
+          <span>3D 模型加载失败，已显示降级场景</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -46,12 +46,17 @@ export function LearningPage() {
         icon="📚"
       />
 
-      {/* 模式切换标签 */}
-      <div className="card animate-fade-up flex flex-wrap justify-center gap-2 p-2 md:p-3" style={{ animationDelay: '80ms' }}>
+      {/* 模式切换标签：role="tablist" + aria-selected 实现标准 ARIA 标签页模式 */}
+      <div className="card animate-fade-up flex flex-wrap justify-center gap-2 p-2 md:p-3" style={{ animationDelay: '80ms' }} role="tablist" aria-label="学习模式切换">
         {MODE_TABS.map((tab) => (
           <button
             key={tab.key}
             type="button"
+            role="tab"
+            id={`tab-${tab.key}`}
+            aria-selected={mode === tab.key ? 'true' : 'false'}
+            aria-controls={`tabpanel-${tab.key}`}
+            tabIndex={mode === tab.key ? 0 : -1}
             onClick={() => setMode(tab.key)}
             className={`group flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all md:flex-none md:px-5 md:py-2.5 ${
               mode === tab.key
@@ -59,7 +64,8 @@ export function LearningPage() {
                 : 'border border-dark-600 bg-dark-800 text-content-secondary hover:border-accent-500/40 hover:text-content-primary'
             }`}
           >
-            <span className={`text-lg transition-transform group-hover:scale-110`}>
+            {/* 装饰性图标：aria-hidden 避免屏幕阅读器重复朗读 */}
+            <span className={`text-lg transition-transform group-hover:scale-110`} aria-hidden="true">
               {tab.icon}
             </span>
             <span>{tab.label}</span>
@@ -67,8 +73,15 @@ export function LearningPage() {
         ))}
       </div>
 
-      {/* 根据模式渲染内容 */}
-      <div className="card animate-fade-up p-4 md:p-6" style={{ animationDelay: '160ms' }}>
+      {/* 根据模式渲染内容：role="tabpanel" 关联对应 tab */}
+      <div
+        className="card animate-fade-up p-4 md:p-6"
+        style={{ animationDelay: '160ms' }}
+        role="tabpanel"
+        id={`tabpanel-${mode}`}
+        aria-labelledby={`tab-${mode}`}
+        tabIndex={0}
+      >
         {mode === 'search' && <WordSearch />}
         {mode === 'practice' && <PracticeMode />}
         {mode === 'tutor' && <AITutor />}

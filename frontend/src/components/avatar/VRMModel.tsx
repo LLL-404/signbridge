@@ -59,6 +59,12 @@ function loadVRMCached(url: string): Promise<VRM> {
     );
   });
   vrmLoadCache.set(url, promise);
+  // 加载失败时清除缓存，允许后续重试（如用户点击"重试"按钮）
+  promise.catch(() => {
+    if (vrmLoadCache.get(url) === promise) {
+      vrmLoadCache.delete(url);
+    }
+  });
   return promise;
 }
 
@@ -124,6 +130,11 @@ export interface VRMModelProps {
    */
   onLoaded?: (vrm: VRM, animator: VRMAnimator) => void;
   /**
+   * 加载失败回调（VRM 文件不可用、解析错误等）
+   * 上层可据此降级到 2D 模式或显示错误提示
+   */
+  onLoadError?: (error: Error) => void;
+  /**
    * 是否启用实时姿态追踪驱动（与离线播放互斥）。
    * 启用时：每帧调用 RealtimePoseDriver.update(realtimePoseEstimate, delta)
    * 禁用时：走 VRMAnimator 离线驱动路径
@@ -140,6 +151,7 @@ export function VRMModel({
   modelUrl = `${import.meta.env.BASE_URL}models/avatar.vrm`,
   lookAtTarget,
   onLoaded,
+  onLoadError,
   useRealtimeTracking = false,
   realtimePoseEstimate = null,
 }: VRMModelProps) {
@@ -167,6 +179,11 @@ export function VRMModel({
   // 用 ref 保存最新的 props，避免 useFrame 闭包过期
   const useRealtimeTrackingRef = useRef(useRealtimeTracking);
   const realtimePoseEstimateRef = useRef<PoseEstimate | null>(realtimePoseEstimate);
+  // 加载失败回调 ref：避免将其加入 useEffect 依赖导致重复加载
+  const onLoadErrorRef = useRef(onLoadError);
+  useEffect(() => {
+    onLoadErrorRef.current = onLoadError;
+  }, [onLoadError]);
 
   // 同步实时追踪相关 props 到 ref，供 useFrame 读取最新值
   useEffect(() => {
@@ -237,7 +254,15 @@ export function VRMModel({
         }
       })
       .catch((err) => {
-        if (!cancelled) log.error('Failed to load VRM', err);
+        if (!cancelled) {
+          // 包装为标准 Error 并附加模型 URL 上下文，便于上层识别与降级
+          const wrapped = err instanceof Error
+            ? err
+            : new Error(`VRM 加载失败: ${String(err)}`);
+          log.error('Failed to load VRM', wrapped, { modelUrl });
+          // 通知父组件触发降级（如切换到 2D 模式或显示错误提示）
+          onLoadErrorRef.current?.(wrapped);
+        }
       });
 
     return () => {

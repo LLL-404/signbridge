@@ -1,0 +1,28 @@
+{
+  "modelFormat": "stgcn-v1",
+  "tfjsVersion": "4.22.0",
+  "nodeVersion": "v24.14.0",
+  "backend": "tensorflow",
+  "trainingParams": {
+    "samplesPerGesture": 200,
+    "epochs": 100,
+    "totalSamples": 2000,
+    "numClasses": 10,
+    "numFrames": 30,
+    "numKeypoints": 21,
+    "coordDim": 2
+  },
+  "metrics": {
+    "finalLoss": 0.3713769018650055,
+    "finalAccuracy": 0.8793749809265137,
+    "evalAccuracy": 0.8349999785423279,
+    "trainingTimeMs": 789609,
+    "trainingTimeSec": 789.609
+  },
+  "files": {
+    "modelJson": "model.json",
+    "weightsBin": "weights.bin",
+    "labelMap": "labelMap.json"
+  },
+  "generatedAt": "2026-07-18T14:35:12.652Z"
+}

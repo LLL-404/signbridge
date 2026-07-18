@@ -33,6 +33,8 @@ export interface AvatarCanvasProps {
   style?: CSSProperties;
   /** VRM 模型加载完成回调，同时传递 VRM 和 VRMAnimator 实例 */
   onVRMLoaded?: (vrm: VRM, animator: VRMAnimator) => void;
+  /** VRM 模型加载失败回调，外层可据此显示全局提示 */
+  onVRMLoadError?: (error: Error) => void;
 }
 
 interface AvatarErrorBoundaryProps {
@@ -117,17 +119,31 @@ export default function AvatarCanvas({
   className,
   style,
   onVRMLoaded,
+  onVRMLoadError,
 }: AvatarCanvasProps) {
   const mode = useAvatarStore((s) => s.mode);
   const setMode = useAvatarStore((s) => s.setMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const [webglAvailable] = useState(() => hasWebGL());
+  // VRM 加载失败时触发自动降级到 2D 模式
+  const [vrmLoadFailed, setVrmLoadFailed] = useState(false);
 
   const size = useContainerSize(containerRef);
-  const effectiveMode = mode === '3d' && webglAvailable ? '3d' : '2d';
+  // WebGL 不可用时强制降级到 2D；VRM 加载失败时也降级
+  const effectiveMode = (mode === '3d' && webglAvailable && !vrmLoadFailed) ? '3d' : '2d';
+  // 是否因环境原因（WebGL 不可用）被动降级，用于显示提示
+  const showWebglFallbackTip = mode === '3d' && !webglAvailable;
 
   const handleFallback = () => {
     setMode('2d');
+  };
+
+  // VRM 加载失败处理：切换到 2D 模式并向上通知
+  const handleVRMLoadError = (error: Error) => {
+    log.warn('VRM 加载失败，自动降级到 2D 模式', error.message);
+    setVrmLoadFailed(true);
+    setMode('2d');
+    onVRMLoadError?.(error);
   };
 
   const containerStyle: CSSProperties = {
@@ -138,6 +154,16 @@ export default function AvatarCanvas({
 
   return (
     <div ref={containerRef} className={className} style={containerStyle}>
+      {/* WebGL 不可用兜底提示：告知用户为何降级到 2D */}
+      {showWebglFallbackTip && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-1.5 text-xs text-yellow-200"
+        >
+          ⚠️ 当前环境不支持 WebGL，已自动切换到 2D 模式
+        </div>
+      )}
       <Suspense fallback={<div className="w-full h-full rounded-2xl bg-slate-900 flex items-center justify-center text-slate-500 text-sm">加载中...</div>}>
         {effectiveMode === '3d' ? (
           <AvatarErrorBoundary
@@ -155,6 +181,7 @@ export default function AvatarCanvas({
               containerStyle={{ width: '100%', height: '100%' }}
               className="!w-full !h-full"
               onVRMLoaded={onVRMLoaded}
+              onVRMLoadError={handleVRMLoadError}
             />
           </AvatarErrorBoundary>
         ) : (

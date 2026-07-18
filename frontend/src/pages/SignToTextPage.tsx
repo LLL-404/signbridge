@@ -361,24 +361,34 @@ export function SignToTextPage() {
             className="card animate-fade-up relative overflow-hidden p-2"
             style={{ width: 484, height: 364, animationDelay: '120ms' }}
           >
-            <video ref={videoRef} className="hidden" playsInline muted />
-            <canvas ref={canvasRef} className="h-full w-full rounded-xl" />
+            {/* video 元素隐藏不显示，aria-hidden 避免屏幕阅读器朗读 */}
+            <video ref={videoRef} className="hidden" playsInline muted aria-hidden="true" />
+            {/* canvas 用于显示摄像头画面与关键点叠加，aria-label 说明用途 */}
+            <canvas
+              ref={canvasRef}
+              className="h-full w-full rounded-xl"
+              role="img"
+              aria-label={isTracking ? '摄像头预览画面，正在追踪手部关键点' : '摄像头预览画面，等待启动识别'}
+            />
 
-            {/* 状态提示 */}
-            <div className="absolute left-5 top-5 rounded-md bg-dark-950/70 px-3 py-1 text-sm font-medium backdrop-blur-sm">
-              <span className={isTracking ? 'text-cyan-400' : 'text-content-muted'}>
+            {/* 状态提示：role="status" + aria-live 让屏幕阅读器实时朗读 */}
+            <div className="absolute left-5 top-5 rounded-md bg-dark-950/70 px-3 py-1 text-sm font-medium backdrop-blur-sm" role="status" aria-live="polite">
+              <span className={isTracking ? 'text-cyan-400' : 'text-content-muted'} aria-hidden="true">
                 ● {isTracking ? '正在识别' : '等待启动'}
               </span>
+              <span className="sr-only">{isTracking ? '正在识别' : '等待启动'}</span>
             </div>
           </div>
         </div>
 
         {/* 右侧：识别结果 */}
         <div className="flex flex-col gap-4">
-          {/* 启动/停止按钮 */}
+          {/* 启动/停止按钮：aria-pressed 标识当前是启动还是停止状态 */}
           <button
             type="button"
             onClick={isTracking ? stopTracking : startTracking}
+            aria-pressed={isTracking ? 'true' : 'false'}
+            aria-label={isTracking ? '停止手势识别' : '启动手势识别'}
             className={`animate-fade-up rounded-lg px-6 py-3 font-medium shadow-md transition-transform hover:scale-[1.02] active:scale-95 ${
               isTracking
                 ? 'border border-red-500/40 bg-red-500/15 text-red-400'
@@ -390,22 +400,22 @@ export function SignToTextPage() {
           </button>
 
           {/* 状态提示 */}
-          <div className={`card animate-fade-up rounded-xl p-4 ${statusConfig.bg}`} style={{ animationDelay: '200ms' }}>
+          <div className={`card animate-fade-up rounded-xl p-4 ${statusConfig.bg}`} style={{ animationDelay: '200ms' }} role="status" aria-live="polite">
             <div className="flex items-center gap-2">
               {status === 'capturing' && (
-                <span className="h-3 w-3 animate-pulse rounded-full bg-cyan-400" />
+                <span className="h-3 w-3 animate-pulse rounded-full bg-cyan-400" aria-hidden="true" />
               )}
               {status === 'recognizing' && (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent-400 border-t-transparent" />
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent-400 border-t-transparent" aria-hidden="true" />
               )}
               <span className={`font-medium ${statusConfig.color}`}>{statusConfig.text}</span>
             </div>
           </div>
 
-          {/* 识别结果 */}
-          <div className="card animate-fade-up flex min-h-[120px] items-center justify-center border border-dashed border-dark-600 p-6 text-center" style={{ animationDelay: '240ms' }}>
+          {/* 识别结果：role="status" + aria-live 让屏幕阅读器朗读识别出的手势 */}
+          <div className="card animate-fade-up flex min-h-[120px] items-center justify-center border border-dashed border-dark-600 p-6 text-center" style={{ animationDelay: '240ms' }} role="status" aria-live="polite">
             {status === 'result' && result ? (
-              <span className="text-5xl font-bold text-accent-300">{result.chinese}</span>
+              <span className="text-5xl font-bold text-accent-300" aria-label={`识别结果：${result.chinese}`}>{result.chinese}</span>
             ) : status === 'waiting' ? (
               <span className="text-xl text-content-muted">等待手势...</span>
             ) : status === 'capturing' ? (
@@ -420,30 +430,32 @@ export function SignToTextPage() {
             <div className="card animate-fade-up border border-dark-600 p-4" style={{ animationDelay: '280ms' }}>
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-content-primary">
-                  🔗 连续手势序列（{gestureSequence.length}）
+                  <span aria-hidden="true">🔗 </span>连续手势序列（{gestureSequence.length}）
                 </h3>
                 <button
+                  type="button"
                   onClick={() => {
                     continuousRecognizerRef.current?.clear();
                     setGestureSequence([]);
                     setCombinedText('');
                   }}
+                  aria-label="清空连续手势序列"
                   className="rounded-md border border-dark-600 bg-dark-800 px-2 py-1 text-xs text-content-secondary hover:bg-dark-700 hover:text-content-primary"
                 >
                   清空
                 </button>
               </div>
               {/* 序列气泡 */}
-              <div className="mb-3 flex flex-wrap gap-2">
+              <ul className="mb-3 flex flex-wrap gap-2" aria-label="连续手势序列">
                 {gestureSequence.map((g, i) => (
-                  <span key={i} className="chip">
+                  <li key={i} className="chip">
                     {g.chinese}
-                  </span>
+                  </li>
                 ))}
-              </div>
+              </ul>
               {/* 组合文本 */}
               {combinedText && (
-                <div className="rounded-lg border border-dark-600 bg-dark-900/50 p-3">
+                <div className="rounded-lg border border-dark-600 bg-dark-900/50 p-3" aria-live="polite">
                   <p className="text-xs text-content-muted">组合识别</p>
                   <p className="text-lg font-bold text-accent-300">{combinedText}</p>
                 </div>
@@ -451,10 +463,10 @@ export function SignToTextPage() {
             </div>
           )}
 
-          {/* 降级模式提示（新增） */}
+          {/* 降级模式提示（新增）：role="alert" 让屏幕阅读器立即朗读 */}
           {degradedMode && (
-            <div className="animate-fade-up rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-400">
-              ⚠️ Worker 不可用，已降级到主线程识别（性能略降，功能正常）
+            <div className="animate-fade-up rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-400" role="alert">
+              <span aria-hidden="true">⚠️ </span>Worker 不可用，已降级到主线程识别（性能略降，功能正常）
             </div>
           )}
 
@@ -463,9 +475,16 @@ export function SignToTextPage() {
             <div className="card animate-fade-up p-4" style={{ animationDelay: '320ms' }}>
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-medium text-content-secondary">置信度</span>
-                <span className="text-sm font-bold text-accent-300">{confidencePercent}%</span>
+                <span className="text-sm font-bold text-accent-300" aria-hidden="true">{confidencePercent}%</span>
               </div>
-              <div className="h-3 w-full overflow-hidden rounded-full bg-dark-700">
+              <div
+                className="h-3 w-full overflow-hidden rounded-full bg-dark-700"
+                role="progressbar"
+                aria-label="识别置信度"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={confidencePercent}
+              >
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-accent-400 to-accent-600 transition-all duration-300"
                   style={{ width: `${confidencePercent}%` }}
@@ -480,7 +499,7 @@ export function SignToTextPage() {
             {history.length === 0 ? (
               <p className="py-4 text-center text-sm text-content-muted">暂无识别记录</p>
             ) : (
-              <ul className="flex flex-col gap-2">
+              <ul className="flex flex-col gap-2" aria-label="识别历史记录列表">
                 {history.map((item) => (
                   <li
                     key={item.id}
@@ -491,7 +510,7 @@ export function SignToTextPage() {
                       <span className="text-xs text-content-muted">
                         {new Date(item.timestamp).toLocaleTimeString('zh-CN')}
                       </span>
-                      <span className="rounded-full bg-accent-500/15 px-2 py-0.5 text-xs font-medium text-accent-300">
+                      <span className="rounded-full bg-accent-500/15 px-2 py-0.5 text-xs font-medium text-accent-300" aria-label={`置信度 ${Math.round(item.confidence * 100)}%`}>
                         {Math.round(item.confidence * 100)}%
                       </span>
                     </div>

@@ -1,0 +1,29 @@
+{
+  "format": "stgcn-v1",
+  "labels": [
+    "fist",
+    "open_palm",
+    "point_up",
+    "thumb_up",
+    "thumb_down",
+    "victory",
+    "i_love_you",
+    "pinch",
+    "three",
+    "horn"
+  ],
+  "chinese": {
+    "fist": "✊ 握拳",
+    "open_palm": "🖐 张开手掌",
+    "point_up": "☝️ 食指上指",
+    "thumb_up": "👍 点赞",
+    "thumb_down": "👎 反对",
+    "victory": "✌️ 胜利",
+    "i_love_you": "🤟 我爱你",
+    "pinch": "🤏 捏合",
+    "three": "3️⃣ 三",
+    "horn": "🤘 角"
+  },
+  "numClasses": 10,
+  "generatedAt": "2026-07-18T14:35:12.646Z"
+}
