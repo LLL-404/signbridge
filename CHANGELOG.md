@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+### ✨ 新增
+- feat(perf): PerformancePanel 新增首屏包体积指标展示——usePerformanceMonitor 通过 PerformanceObserver 监听 `resource` 类型条目，过滤 `.js`/`.css` 资源汇总 chunk 总大小/数量/加载时间；PerformancePanel 复用 MetricItem 组件新增"包体积"区块（阈值：chunk 总大小 500/1000 KB，chunk 数量 20/50 个，加载时间 1500/3000 ms），3 秒后自动 disconnect 避免长期占用
+- feat(avatar): AvatarDriver 新增穿模检测 hook——`update()` 中调用 `checkPenetration()`，通过 normalized bone API 获取手腕世界位置与 hips 位置比较（`|hand.x - hips.x| < 0.15 && |hand.z - hips.z| < 0.12`），穿入躯干时输出 `log.warn('[穿模检测] 手腕穿入躯干', { hand, position })`；单侧日志限流 3 次避免刷屏，仅在 `playRetargetedAnimation` 播放期间检测；复用 `_tmp*Pos: THREE.Vector3` 实例避免 GC 压力
+
+### ⚡ 性能
+- perf: VRM 模型懒加载验证通过——`Avatar3D.tsx` 使用 `LazyVRMModel = lazy(() => import('./VRMModel'))` 异步加载，首屏不请求 10.7MB 的 `models/avatar.vrm` 文件，仅当导航到 `/voice-to-sign` 等使用 3D 化身的页面时才加载
+- perf: Lighthouse 性能审计达成目标（desktop 预设）——Performance 评分 100，LCP 788ms（< 800ms 阈值），FCP 521ms（< 1.5s 阈值），TBT 0ms，CLS 0；首屏 JS/CSS 资源加载时间约 1.5s，主要受 Three.js（962KB）和 TF.js（1.59MB）vendor chunk 影响
+
+### 🔧 修复
+- fix(e2e): 修复 E2E 测试超时失败（2/14 → 14/14 通过）——「应能导航到各功能页面」和「应显示双面板布局」测试默认 30s 超时不足，提升至 `test.setTimeout(60000)`，导航改用 `waitUntil: 'domcontentloaded'`，缩短中间步骤 `waitForTimeout`，添加 `page.locator('body').waitFor({ state: 'attached', timeout: 30000 })` 等待页面就绪
+
+### 📦 维护
+- chore(ci): CI 流水线新增 E2E 测试步骤——在单元测试后添加 `npx playwright install chromium --with-deps` 安装浏览器、`npx playwright test` 执行测试、`actions/upload-artifact@v4` 上传 `playwright-report`（保留 7 天，`if: ${{ !cancelled() }}` 确保失败时也上传）
+- chore: `frontend/.gitignore` 新增 Playwright 测试产物忽略规则（`test-results/`、`playwright-report/`），避免测试报告被误提交
+
 ### 🔧 修复
 - fix(lint): 修复 3 个 ESLint error——ClipBuilder.ts:445 `let elbowHint` 改为 `const`（prefer-const）；usePerformanceMonitor.ts:53 TTFB 计算移入 useState lazy initializer 消除 set-state-in-effect；AvatarCanvas.tsx:127 WebGL 检测移入 useState lazy initializer 消除 set-state-in-effect。`npx eslint .` 退出码 0（0 errors, 12 warnings）
 - fix(avatar): 修复解析法 IK 上臂方向公式几何错误——`dir.applyAxisAngle(elbowDir, -shoulderLift)` 在垂直于 elbowDir 的平面内旋转，结果永远无 elbowDir 分量；正确公式为 `dir*cos(shoulderLift) + elbowDir*sin(shoulderLift)`（肘部在 elbowDir 方向偏移 L1*sin(shoulderLift)）。旧公式在 A-pose 下因对称性巧合正确，VRM T-pose 下对称性破坏导致 upperArmDir X 分量符号反转，右手臂伸到身体对侧（「他/谢谢/对不起」实测肘部穿透躯干）。ClipBuilder.ts 与 IKSolver.ts 同步修复，真实 VRM 模型集成测试 74 项全部通过

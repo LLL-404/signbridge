@@ -4,6 +4,7 @@
 //   - 新 AnimationClip 轨道（VRMAnimator 驱动，3D VRM 模式）
 // 新轨道通过 ClipBuilder 生成 AnimationClip，交由 VRMAnimator 播放，
 // 不再维护 VRMPose 状态与每帧手动设置 node.quaternion。
+import * as THREE from 'three';
 import type { BonePose, Frame, JointPose, MotionData, Vec3, HandPose, VRMPose } from '@/types/avatar';
 import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
 import type { GlossSequence, NonManualMark } from '@/types/grammar';
@@ -279,6 +280,18 @@ export class AvatarDriver {
   /** 已加载的 VRM 模型实例 */
   private vrm: VRM | null = null;
 
+  // ===== 穿模检测相关字段 =====
+  /** 是否正在播放 Mixamo 重定向动画（仅在此时进行每帧穿模检测） */
+  private isPlayingRetargetedAnim = false;
+  /** 单只手在同一动画内的穿模日志计数（达到上限后不再输出，避免刷屏） */
+  private penetrationLogCount = { left: 0, right: 0 };
+  /** 同一动画内同一只手的穿模日志上限 */
+  private static readonly MAX_PENETRATION_LOGS = 3;
+  /** 复用 Vector3 实例，避免每帧分配造成 GC 压力 */
+  private readonly _tmpLeftHandPos = new THREE.Vector3();
+  private readonly _tmpRightHandPos = new THREE.Vector3();
+  private readonly _tmpHipsPos = new THREE.Vector3();
+
   /**
    * 注入 VRMAnimator 与 VRM 实例
    * 由 VRMModel 在 VRM 加载成功后调用，把同一份 VRMAnimator 实例共享给 AvatarDriver，
@@ -311,6 +324,11 @@ export class AvatarDriver {
       return;
     }
 
+    // 标记进入 Mixamo 重定向动画播放，启用 update() 中的每帧穿模检测；
+    // 重置日志计数器，确保本次动画的穿模日志配额独立。
+    this.isPlayingRetargetedAnim = true;
+    this.penetrationLogCount = { left: 0, right: 0 };
+
     try {
       // 动态加载 FBXLoader，避免首屏包体积增加
       const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js');
@@ -331,8 +349,8 @@ export class AvatarDriver {
 
       // 穿模检测说明：重定向动画无轨迹点（不同于 ClipBuilder.buildArmTracks 生成的轨道），
       // 无法用同样方法做静态穿模检测，需运行时每帧检测手腕位置是否穿入躯干。
-      // 此处仅输出占位日志，实际每帧检测在 AvatarDriver.update 中需新增 hook（暂未实现）。
-      log.info('[穿模统计] Mixamo重定向动画 | 轨迹点=N/A | 需运行时每帧检测');
+      // 标志位 isPlayingRetargetedAnim 已置为 true，update() 会调用 checkPenetration() 执行每帧检测。
+      log.info('[穿模统计] Mixamo重定向动画 | 轨迹点=N/A | 运行时每帧检测已启用');
 
       // 等待 clip 播放完成后触发 onComplete
       await this.waitClipFinish(retargetedClip.duration);
@@ -340,6 +358,9 @@ export class AvatarDriver {
     } catch (err) {
       log.error('playRetargetedAnimation 失败', { url, err });
       onComplete?.();
+    } finally {
+      // 无论成功/失败/提前返回，都重置穿模检测标志，避免后续误检测
+      this.isPlayingRetargetedAnim = false;
     }
   }
 
@@ -462,6 +483,10 @@ export class AvatarDriver {
     if (this.playing) {
       this.motionPlayer.update(deltaTime);
     }
+    // 穿模检测（仅在播放 Mixamo 重定向动画时）
+    if (this.isPlayingRetargetedAnim && this.vrm) {
+      this.checkPenetration();
+    }
   }
 
   // ===== 内部方法 =====
@@ -538,5 +563,66 @@ export class AvatarDriver {
     this.resolvePromise = null;
     if (cb) cb();
     if (resolve) resolve();
+  }
+
+  // ===== 穿模检测 =====
+
+  /**
+   * 检测手腕是否穿入躯干边界（每帧调用，仅在播放 Mixamo 重定向动画时）
+   *
+   * 躯干边界定义：以 hips 骨骼世界位置为中心，
+   *   X 方向 ±0.15m，Z 方向 ±0.12m 的矩形区域（不考虑 Y，因为手腕在不同高度都可能穿入躯干）。
+   *
+   * 穿模时通过 log.warn 输出警告，不中断动画播放；
+   * 同一动画内同一只手最多记录 MAX_PENETRATION_LOGS 次，避免日志刷屏。
+   */
+  private checkPenetration(): void {
+    if (!this.vrm) return;
+
+    const humanoid = this.vrm.humanoid;
+    const hipsNode = humanoid.getNormalizedBoneNode('hips' as never);
+    const leftHandNode = humanoid.getNormalizedBoneNode('leftHand' as never);
+    const rightHandNode = humanoid.getNormalizedBoneNode('rightHand' as never);
+    // 任一关键骨骼缺失则无法检测，直接跳过
+    if (!hipsNode || !leftHandNode || !rightHandNode) return;
+
+    hipsNode.getWorldPosition(this._tmpHipsPos);
+    const hipsX = this._tmpHipsPos.x;
+    const hipsZ = this._tmpHipsPos.z;
+
+    this.checkHandPenetration('left', leftHandNode, hipsX, hipsZ, this._tmpLeftHandPos);
+    this.checkHandPenetration('right', rightHandNode, hipsX, hipsZ, this._tmpRightHandPos);
+  }
+
+  /**
+   * 检测单只手是否穿入躯干边界，穿模时输出警告日志（受计数限制）
+   *
+   * @param hand 'left' 或 'right'，用于日志与计数器索引
+   * @param handNode 手腕骨骼节点（leftHand / rightHand normalized bone）
+   * @param hipsX hips 世界坐标 X（已预先读取，避免重复读取）
+   * @param hipsZ hips 世界坐标 Z
+   * @param tmpPos 复用的 Vector3，用于接收手腕世界位置（避免每帧分配）
+   */
+  private checkHandPenetration(
+    hand: 'left' | 'right',
+    handNode: THREE.Object3D,
+    hipsX: number,
+    hipsZ: number,
+    tmpPos: THREE.Vector3,
+  ): void {
+    handNode.getWorldPosition(tmpPos);
+    // 躯干边界：|Δx| < 0.15 且 |Δz| < 0.12 视为穿模
+    const isPenetrating =
+      Math.abs(tmpPos.x - hipsX) < 0.15 &&
+      Math.abs(tmpPos.z - hipsZ) < 0.12;
+    if (!isPenetrating) return;
+    // 达到日志上限后不再输出，但仍继续检测（不中断动画）
+    if (this.penetrationLogCount[hand] >= AvatarDriver.MAX_PENETRATION_LOGS) return;
+
+    this.penetrationLogCount[hand]++;
+    log.warn('[穿模检测] 手腕穿入躯干', {
+      hand,
+      position: { x: tmpPos.x, y: tmpPos.y, z: tmpPos.z },
+    });
   }
 }

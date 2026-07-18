@@ -31,22 +31,26 @@ test.describe('应用启动与导航', () => {
   });
 
   test('应能导航到各功能页面', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForTimeout(3000);
+    // 多次顺序导航耗时较长，提高单测超时上限
+    test.setTimeout(60000);
+
+    // 使用 domcontentloaded 替代默认的 load，减少等待时间
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
 
     // 导航到手语识别
-    await page.goto('/sign-to-text');
-    await page.waitForTimeout(2000);
+    await page.goto('/sign-to-text', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
     expect(page.url()).toContain('/sign-to-text');
 
     // 导航到双向对话
-    await page.goto('/dialogue');
-    await page.waitForTimeout(2000);
+    await page.goto('/dialogue', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
     expect(page.url()).toContain('/dialogue');
 
     // 导航到学习
-    await page.goto('/learning');
-    await page.waitForTimeout(2000);
+    await page.goto('/learning', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
     expect(page.url()).toContain('/learning');
   });
 
@@ -119,7 +123,12 @@ test.describe('手语识别页面', () => {
 
 test.describe('双向对话页面', () => {
   test('应显示双面板布局', async ({ page }) => {
-    await page.goto('/dialogue');
+    // 双向对话页面懒加载较慢，提高单测超时上限
+    test.setTimeout(60000);
+
+    // 使用 domcontentloaded 加速导航，并显式等待 body 就绪
+    await page.goto('/dialogue', { waitUntil: 'domcontentloaded' });
+    await page.locator('body').waitFor({ state: 'attached', timeout: 30000 });
     await page.waitForTimeout(3000);
 
     const pageContent = await page.textContent('body');

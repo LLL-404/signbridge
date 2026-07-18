@@ -92,6 +92,13 @@ export function PerformancePanel() {
               <MetricItem label="TF.js推理" value={report.metrics.tfjsInferenceTime} unit="ms" good={50} warn={200} />
               <MetricItem label="内存使用" value={report.metrics.memoryUsage} unit="MB" good={200} warn={500} />
             </div>
+
+            <div className="border-t border-dark-700 pt-2">
+              <div className="text-[10px] font-semibold text-content-secondary uppercase tracking-wider mb-1">包体积</div>
+              <MetricItem label="Chunk 总大小" value={report.bundleMetrics?.totalChunkSize ?? null} unit="KB" good={500} warn={1000} />
+              <MetricItem label="Chunk 数量" value={report.bundleMetrics?.chunkCount ?? null} unit="" good={20} warn={50} />
+              <MetricItem label="加载时间" value={report.bundleMetrics?.loadTime ?? null} unit="ms" good={1500} warn={3000} />
+            </div>
           </div>
 
           <div className="p-2 border-t border-dark-700 text-[9px] text-content-muted text-center">

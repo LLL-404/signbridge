@@ -24,10 +24,18 @@ export interface CustomMetrics {
   memoryUsage: number | null;        // 内存使用量 (MB，如可用)
 }
 
+/** 首屏包体积指标 */
+export interface BundleMetrics {
+  totalChunkSize: number;  // 首屏加载的 JS/CSS 总大小（KB）
+  chunkCount: number;      // 首屏加载的 chunk 数量
+  loadTime: number;        // 首屏资源加载时间（ms）
+}
+
 /** 完整性能报告 */
 export interface PerformanceReport {
   vitals: WebVitals;
   metrics: CustomMetrics;
+  bundleMetrics: BundleMetrics | null;
   timestamp: number;
 }
 
@@ -39,6 +47,7 @@ export function usePerformanceMonitor(enabled: boolean = true) {
     return {
       vitals: { fcp: null, lcp: null, fid: null, cls: null, ttfb },
       metrics: { tfjsInferenceTime: null, renderFps: null, memoryUsage: null },
+      bundleMetrics: null,
       timestamp: Date.now(),
     };
   });
@@ -131,6 +140,60 @@ export function usePerformanceMonitor(enabled: boolean = true) {
       }
     }, 5000);
     return () => clearInterval(interval);
+  }, [enabled]);
+
+  // 首屏包体积监控：3 秒内采集 JS/CSS 资源，然后停止
+  useEffect(() => {
+    if (!enabled) return;
+
+    let totalSize = 0;
+    let chunkCount = 0;
+    let minStartTime = Infinity;
+    let maxResponseEnd = 0;
+    let stopped = false;
+
+    // 汇总当前采集结果到 report
+    const flush = () => {
+      if (chunkCount === 0) return;
+      setReport((prev) => ({
+        ...prev,
+        bundleMetrics: {
+          totalChunkSize: totalSize / 1024,
+          chunkCount,
+          loadTime: maxResponseEnd - minStartTime,
+        },
+      }));
+    };
+
+    const resourceObserver = new PerformanceObserver((list) => {
+      if (stopped) return;
+      for (const entry of list.getEntries()) {
+        const resEntry = entry as PerformanceResourceTiming;
+        // 仅统计 JS/CSS 资源
+        if (resEntry.name.includes('.js') || resEntry.name.includes('.css')) {
+          // 优先使用 transferSize（含压缩），回退到 decodedBodySize
+          totalSize += resEntry.transferSize || resEntry.decodedBodySize || 0;
+          chunkCount++;
+          if (resEntry.startTime < minStartTime) minStartTime = resEntry.startTime;
+          if (resEntry.responseEnd > maxResponseEnd) maxResponseEnd = resEntry.responseEnd;
+        }
+      }
+      flush();
+    });
+    resourceObserver.observe({ type: 'resource', buffered: true });
+
+    // 3 秒后停止采集并完成最后一次汇总
+    const stopTimer = setTimeout(() => {
+      stopped = true;
+      resourceObserver.disconnect();
+      flush();
+    }, 3000);
+
+    return () => {
+      stopped = true;
+      clearTimeout(stopTimer);
+      resourceObserver.disconnect();
+    };
   }, [enabled]);
 
   /** 记录 TF.js 推理耗时 */
