@@ -1,4 +1,4 @@
-# SignBridge CI —— 类型检查 + 依赖架构校验 + 单元测试 + 构建
+# SignBridge CI —— 类型检查 + 代码规范检查 + 依赖架构校验 + 单元测试 + 构建
 # 在 PR 和 push 到 master 时自动运行
 
 name: CI
@@ -32,6 +32,9 @@ jobs:
 
       - name: 类型检查
         run: npx tsc --noEmit -p tsconfig.app.json
+
+      - name: 代码规范检查
+        run: npm run lint
 
       - name: 依赖架构校验
         run: npm run deps:check

@@ -1,0 +1,10 @@
+- [x] Checkpoint 1: 首屏 gzip 体积 < 45KB（通过 Vite build 验证）
+- [ ] Checkpoint 2: LCP < 800ms（通过性能监控验证）
+- [ ] Checkpoint 3: FCP < 1.5s（通过性能监控验证）
+- [x] Checkpoint 4: 所有单元测试通过（npx vitest run）
+- [ ] Checkpoint 5: Lighthouse 性能评分 > 90
+- [ ] Checkpoint 6: 首屏加载时不请求 VRM 模型（通过浏览器网络面板验证）
+- [x] Checkpoint 7: 词汇数据使用 NetworkFirst 缓存策略
+- [x] Checkpoint 8: 生成包体积分析报告（stats.html）
+- [x] Checkpoint 9: 识别出至少 3 个体积热点（每个 > 10KB）
+- [ ] Checkpoint 10: PerformancePanel 显示新增的包体积指标

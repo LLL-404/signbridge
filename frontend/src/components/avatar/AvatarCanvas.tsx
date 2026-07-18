@@ -121,11 +121,7 @@ export default function AvatarCanvas({
   const mode = useAvatarStore((s) => s.mode);
   const setMode = useAvatarStore((s) => s.setMode);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [webglAvailable, setWebglAvailable] = useState(true);
-
-  useEffect(() => {
-    setWebglAvailable(hasWebGL());
-  }, []);
+  const [webglAvailable] = useState(() => hasWebGL());
 
   const size = useContainerSize(containerRef);
   const effectiveMode = mode === '3d' && webglAvailable ? '3d' : '2d';

@@ -23,15 +23,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { visualizer } from 'rollup-plugin-visualizer'
 import path from 'node:path'
 
 export default defineConfig({
   base: process.env.GITHUB_PAGES ? '/signbridge/' : '/',
   plugins: [
     react(),
+    visualizer({
+      filename: 'dist/stats.html',
+      open: false,
+      gzipSize: true,
+      brotliSize: true,
+    }),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['data/vocabulary.json'],
+      includeAssets: [],
       manifest: {
         name: '手语桥 SignBridge',
         short_name: '手语桥',
@@ -58,7 +65,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,json,wasm}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
+        globIgnores: ['**/data/vocabulary.json'],
         navigateFallback: process.env.GITHUB_PAGES ? '/signbridge/index.html' : '/index.html',
         runtimeCaching: [
           {
@@ -75,6 +83,14 @@ export default defineConfig({
             options: {
               cacheName: 'model-cache',
               expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 7 },
+            },
+          },
+          {
+            urlPattern: /^.*\/data\/vocabulary\.json$/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'vocabulary-cache',
+              expiration: { maxEntries: 1, maxAgeSeconds: 60 * 60 * 24 * 7 },
             },
           },
         ],
@@ -98,12 +114,37 @@ export default defineConfig({
     minify: 'esbuild',
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'three-vendor': ['three', '@react-three/fiber', '@react-three/drei'],
-          'tfjs-vendor': ['@tensorflow/tfjs'],
-          'mediapipe-vendor': ['@mediapipe/tasks-vision'],
-          'state-vendor': ['zustand'],
+        manualChunks: (id) => {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router')) {
+            return 'react-vendor'
+          }
+          if (id.includes('node_modules/three') || id.includes('node_modules/@react-three') || id.includes('node_modules/@pixiv/three-vrm')) {
+            return 'three-vendor'
+          }
+          if (id.includes('node_modules/@tensorflow')) {
+            return 'tfjs-vendor'
+          }
+          if (id.includes('node_modules/@mediapipe')) {
+            return 'mediapipe-vendor'
+          }
+          if (id.includes('node_modules/zustand')) {
+            return 'state-vendor'
+          }
+          if (id.includes('src/modules/avatar/') && (id.includes('VRM') || id.includes('vrm'))) {
+            return 'vrm-module'
+          }
+          if (id.includes('src/modules/recognition/')) {
+            return 'recognition-module'
+          }
+          if (id.includes('src/modules/grammar/')) {
+            return 'grammar-module'
+          }
+          if (id.includes('src/modules/data/')) {
+            return 'data-module'
+          }
+          if (id.includes('src/modules/learning/')) {
+            return 'learning-module'
+          }
         },
       },
     },

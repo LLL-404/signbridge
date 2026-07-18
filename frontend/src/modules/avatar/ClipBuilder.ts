@@ -10,13 +10,13 @@
 import * as THREE from 'three';
 import type { VRM } from '@pixiv/three-vrm';
 import type { SignGloss } from '@/types/sign';
-import { HandLocation, HandShape, FacialExpression, Movement, PalmOrientation } from '@/types/sign';
+import { HandLocation, HandShape, FacialExpression, Movement, PalmOrientation, HeadMovement } from '@/types/sign';
 import type { Vec3 } from '@/types/avatar';
 import { getHandShapeDefinition } from './HandShape';
 import { solveFABRIK } from './IKSolver';
 import { computeHingeAxis, constrainHingeJoint, constrainShoulderByDirection, constrainForearmRotation, applyVRMCConstraints, getVRMConstraintCache, type VRMConstraintMap } from './JointLimits';
 import { buildBodyVolume, isInsideTorso, isInsideHead, projectToSurface, type BodyVolume } from './BodyVolume';
-import { parseHandShape, parseHandLocation, parseFacialExpression, parsePalmOrientation } from './EnumParser';
+import { parseHandShape, parseHandLocation, parseFacialExpression, parsePalmOrientation, parseHeadMovement } from './EnumParser';
 import { logger } from '@/modules/debug/logger';
 
 const log = logger.module('ClipBuilder');
@@ -41,6 +41,11 @@ const DEFAULT_DURATION_MS = 1000;
 
 /** 上方向单位向量，用于计算肘部铰链轴 */
 const UP = new THREE.Vector3(0, 1, 0);
+
+/** 计算四元数旋转角度（弧度）：θ = 2 * acos(|w|) */
+function quatAngle(q: THREE.Quaternion): number {
+  return 2 * Math.acos(Math.min(1, Math.abs(q.w)));
+}
 
 /**
  * HandLocation → 相对 hips 的偏移（scene 本地坐标系，单位：米，标准人体比例）
@@ -207,6 +212,7 @@ function buildMovementTrajectory(
 
   switch (movement) {
     // 1. 线性类（含 STATIC：起止相同，所有点位置一致）
+    // 使用 8 点采样（原 5 点）减少相邻帧间旋转变化，使 AnimationMixer 的 SLERP 插值更平滑
     case Movement.STATIC:
     case Movement.UPWARD:
     case Movement.DOWNWARD:
@@ -217,15 +223,15 @@ function buildMovementTrajectory(
     case Movement.FORWARD:
     case Movement.HORIZONTAL_LINE:
     case Movement.VERTICAL_LINE:
-      return buildLinear(5);
+      return buildLinear(8);
 
     // 2. 弧线类：线性插值 + Y 方向抛物线偏移
     case Movement.UPWARD_ARC:
     case Movement.DOWNWARD_ARC: {
       const yOffset = movement === Movement.UPWARD_ARC ? 0.15 : -0.15;
       const points: TrajectoryPoint[] = [];
-      for (let i = 0; i < 5; i++) {
-        const t = i / 4;
+      for (let i = 0; i < 8; i++) {
+        const t = i / 7;
         const pos = startTarget.clone().lerp(endTarget, t);
         pos.y += 4 * t * (1 - t) * yOffset;
         points.push({ time: t * durationSec, position: pos });
@@ -284,30 +290,39 @@ function buildMovementTrajectory(
       return points;
     }
 
-    // 6. 点触 TAP：5 点 1 次往返（start→接触→start→接触→start）
+    // 6. 点触 TAP：8 点 1 次平滑往返（半正弦波：0→amp→0）
+    // 旧实现用 5 个离散点（start→contact→start→contact→start），相邻点 z 跳变 0.1m，
+    // 导致 IK 解在两个截然不同的肘部姿态间跳变（signedAngle 差异 >70°）。
+    // 改用半正弦波：z(t) = amp * sin(π * t)，t∈[0,1]，z 连续变化 0→amp→0，
+    // IK 解随 z 平滑变化，避免分支跳跃。物理语义更接近真实手语（人手有惯性）。
     case Movement.TAP: {
-      const contact = startTarget.clone().add(new THREE.Vector3(0, 0, 0.1));
-      const positions = [
-        startTarget.clone(), contact, startTarget.clone(),
-        contact.clone(), startTarget.clone(),
-      ];
-      return positions.map((pos, i) => ({
-        time: (i / 4) * durationSec,
-        position: pos,
-      }));
+      const amplitude = 0.1;
+      const points: TrajectoryPoint[] = [];
+      for (let i = 0; i < 8; i++) {
+        const t = i / 7;
+        const zOffset = amplitude * Math.sin(Math.PI * t);
+        points.push({
+          time: t * durationSec,
+          position: startTarget.clone().add(new THREE.Vector3(0, 0, zOffset)),
+        });
+      }
+      return points;
     }
 
-    // 6b. 点触 TAP_TWICE：6 点 2 次往返
+    // 6b. 点触 TAP_TWICE：8 点 2 次平滑往返（全正弦取绝对值：0→amp→0→amp→0）
+    // 同 TAP 的平滑化理由，旧 6 点离散实现导致 IK 跳变。
     case Movement.TAP_TWICE: {
-      const contact = startTarget.clone().add(new THREE.Vector3(0, 0, 0.1));
-      const positions = [
-        startTarget.clone(), contact, startTarget.clone(),
-        contact.clone(), startTarget.clone(), contact.clone(),
-      ];
-      return positions.map((pos, i) => ({
-        time: (i / 5) * durationSec,
-        position: pos,
-      }));
+      const amplitude = 0.1;
+      const points: TrajectoryPoint[] = [];
+      for (let i = 0; i < 8; i++) {
+        const t = i / 7;
+        const zOffset = amplitude * Math.abs(Math.sin(2 * Math.PI * t));
+        points.push({
+          time: t * durationSec,
+          position: startTarget.clone().add(new THREE.Vector3(0, 0, zOffset)),
+        });
+      }
+      return points;
     }
 
     // 7. 勾连：5 点向中心汇聚，X 渐趋向 0，Y 渐降
@@ -419,17 +434,22 @@ function solveArmQuaternions(
   lowerRestDir: THREE.Vector3,
   bodyVolume?: BodyVolume,
   hipsDir?: THREE.Vector3,
-): { upper: THREE.Quaternion; lower: THREE.Quaternion; elbowPenetrated: boolean } {
+  previousElbowDir?: THREE.Vector3,
+): { upper: THREE.Quaternion; lower: THREE.Quaternion; elbowPenetrated: boolean; elbowDir: THREE.Vector3 } {
   // ===== IK_MODE 分发：FABRIK 模式调用 solveFABRIK，转四元数后提前返回 =====
   // 'fabrik' 与 'constraint' 当前行为一致：FABRIK 求解后不再走解析法的 VRMC 步骤8，
   // 因 VRMC 应用依赖解析法中间变量（upperRestDir/elbowPos/forearmLocalDir 等）
   if (IK_MODE === 'fabrik' || IK_MODE === 'constraint') {
     // 肘引导方向：基于 hipsDir 与 upperRestDir 推导，与解析法步骤2 中 reference 一致
+    // 肘部连续性：若 previousElbowDir 存在且与新 hint 方向相反，则翻转 hint 保持连续
     const elbowHint = new THREE.Vector3(
       (hipsDir?.x ?? 0) + upperRestDir.x * 0.6,
       hipsDir?.y ?? -1,
       (hipsDir?.z ?? 0) + 0.6,
     ).normalize();
+    if (previousElbowDir && elbowHint.dot(previousElbowDir) < 0) {
+      elbowHint.negate();
+    }
 
     const fabrikResult = solveFABRIK(
       { x: shoulderPos.x, y: shoulderPos.y, z: shoulderPos.z },
@@ -439,6 +459,7 @@ function solveArmQuaternions(
       side,
       elbowHint,
       10, // iterations
+      upperRestDir, // 传入实际骨骼 rest direction
     );
 
     // IKResult（欧拉角 XYZ）→ 四元数
@@ -469,6 +490,7 @@ function solveArmQuaternions(
       upper: upperQuatFabrik,
       lower: lowerQuatFabrik,
       elbowPenetrated: elbowPenetratedFabrik,
+      elbowDir: elbowHint,
     };
   }
 
@@ -520,8 +542,29 @@ function solveArmQuaternions(
   }
   elbowDir.normalize();
 
+  // 肘部方向连续性约束：若提供了上一帧的 elbowDir 且当前方向与之相反（dot < 0），
+  // 则翻转当前 elbowDir，避免相邻帧肘部位置突变（"肘部翻转"问题）。
+  // 这是 IK 求解器的经典问题——当手腕方向跨越奇异点时，肘部会突然跳到另一侧。
+  // 翻转 elbowDir 不影响 IK 解的可达性（同一 elbowDir 反向对应肘部在另一侧），
+  // 但保持了时序连续性，使动画不抖动。
+  if (previousElbowDir && elbowDir.dot(previousElbowDir) < 0) {
+    elbowDir.negate();
+  }
+
   // === 3. 上臂方向（从肩 S 指向肘 A） ===
-  const upperArmDir = dir.clone().applyAxisAngle(elbowDir, -shoulderLift);
+  // 几何推导：肘部在以 dir 为轴、半径 L1*sin(shoulderLift) 的圆上（圆面垂直 dir），
+  // 肘部位置 = S + dir*L1*cos(shoulderLift) + elbowDir*L1*sin(shoulderLift)
+  // 因此 upperArmDir = dir*cos(shoulderLift) + elbowDir*sin(shoulderLift)
+  //
+  // 注意：旧实现用 `dir.applyAxisAngle(elbowDir, -shoulderLift)`，几何含义是
+  // "在垂直于 elbowDir 的平面内绕 elbowDir 旋转 dir"，结果向量永远与 elbowDir 垂直，
+  // 没有 elbowDir 分量。这与正确公式（含 sin(shoulderLift)*elbowDir 分量）完全不同。
+  // 旧公式在 A-pose（upperRestDir=(0,-1,0)，dir 也大致向下）下因对称性巧合正确，
+  // 但 VRM T-pose（upperRestDir=(-1,0,0)，dir 水平）下对称性被打破，
+  // 导致 upperArmDir 的 X 分量符号反转，手臂伸到身体对侧（「他」案例实测）。
+  // 改为直接构造，几何意义明确，无符号歧义。
+  const upperArmDir = dir.clone().multiplyScalar(Math.cos(shoulderLift))
+    .add(elbowDir.clone().multiplyScalar(Math.sin(shoulderLift)));
 
   // === 4. 肩部四元数：把 upperRestDir 旋转到 upperArmDir ===
   const upperQuat = new THREE.Quaternion().setFromUnitVectors(upperRestDir, upperArmDir);
@@ -609,7 +652,7 @@ function solveArmQuaternions(
     signedAngle: signedAngle * 180 / Math.PI,
   });
 
-  return { upper: upperQuat, lower: lowerQuat, elbowPenetrated };
+  return { upper: upperQuat, lower: lowerQuat, elbowPenetrated, elbowDir };
 }
 
 /**
@@ -710,7 +753,12 @@ function buildArmTracks(
 
   // 对每个轨迹点进行 IK 解算，记录肩肘四元数
   // 累计肘部穿透次数用于数据级验证日志
+  // 跟踪上一帧的 elbowDir 用于肘部方向连续性约束，防止"肘部翻转"抖动
   let elbowPenetrationCount = 0;
+  let prevElbowDir: THREE.Vector3 | undefined;
+  // 暂存每帧四元数（用于后续时序平滑后处理）
+  const upperQuatList: THREE.Quaternion[] = [];
+  const lowerQuatList: THREE.Quaternion[] = [];
   for (const point of trajectory) {
     const ik = solveArmQuaternions(
       shoulderSceneLocal,
@@ -720,14 +768,42 @@ function buildArmTracks(
       side,
       upperRestDir,
       lowerRestDir,
-      bodyVolume,  // 传入用于肘部穿透检测
-      hipsDir,     // 传入用于肘引导方向动态化
+      bodyVolume,      // 传入用于肘部穿透检测
+      hipsDir,         // 传入用于肘引导方向动态化
+      prevElbowDir,    // 传入上一帧 elbowDir 保持连续性
     );
 
     if (ik.elbowPenetrated) elbowPenetrationCount++;
+    prevElbowDir = ik.elbowDir;
 
-    upperQuats.push(ik.upper.x, ik.upper.y, ik.upper.z, ik.upper.w);
-    lowerQuats.push(ik.lower.x, ik.lower.y, ik.lower.z, ik.lower.w);
+    upperQuatList.push(ik.upper.clone());
+    lowerQuatList.push(ik.lower.clone());
+  }
+
+  // 时序平滑后处理：IK 解的"分支跳跃"修正
+  // 问题：解析法 IK 对每个轨迹点独立求解，当目标位置跨越奇异点时，
+  // setFromUnitVectors 的最短旋转选择可能跳到另一个分支，
+  // 导致相邻帧 lowerQuat 旋转差异 >60°（实测 wave/tap_twice 达 78°/66°）。
+  // 修复：检测相邻帧旋转差异 >60° 的跳变帧，用前一帧四元数 SLERP 插值替代。
+  // 这是动画行业处理 IK 跳变的标准后处理（参考 FABRIK 的时序连续性思想）。
+  // 代价：跳变帧的 IK 解不精确，但保持时序连续性，避免动画抖动。
+  const SMOOTH_THRESHOLD = (60 * Math.PI) / 180;
+  if (lowerQuatList.length > 2) {
+    for (let i = 1; i < lowerQuatList.length; i++) {
+      const delta = quatAngle(lowerQuatList[i].clone().multiply(lowerQuatList[i - 1].clone().invert()));
+      if (delta > SMOOTH_THRESHOLD) {
+        // 跳变帧：用前一帧 SLERP 插值（t=0.5）替代，保持连续性
+        lowerQuatList[i].slerpQuaternions(lowerQuatList[i - 1], lowerQuatList[i], 0.5);
+        // 同步平滑 upperQuat，保持肩肘协调
+        upperQuatList[i].slerpQuaternions(upperQuatList[i - 1], upperQuatList[i], 0.5);
+      }
+    }
+  }
+
+  // 展平为关键帧轨道所需的 number[] 格式
+  for (let i = 0; i < upperQuatList.length; i++) {
+    upperQuats.push(upperQuatList[i].x, upperQuatList[i].y, upperQuatList[i].z, upperQuatList[i].w);
+    lowerQuats.push(lowerQuatList[i].x, lowerQuatList[i].y, lowerQuatList[i].z, lowerQuatList[i].w);
   }
 
   // 数据级验证日志：汇总本 clip 的穿模修正统计（info 级别，便于浏览器控制台捕获）
@@ -778,10 +854,10 @@ function buildRestArmTracks(
 
 /**
  * 生成手指骨的 QuaternionKeyframeTrack（每只手 15 个）
- * 从 HandShape 查表获取屈曲角度，绕本地 X 轴旋转
+ * 从 HandShape 查表获取三轴旋转角度（X 屈曲 + Y 外展 + Z 旋转）
  * 起止手形间用 2 个关键帧线性插值（AnimationMixer 自动平滑）
  */
-function buildFingerTracks(
+export function buildFingerTracks(
   vrm: VRM,
   side: 'left' | 'right',
   shapeStart: HandShape,
@@ -792,6 +868,8 @@ function buildFingerTracks(
   const prefix = side === 'left' ? 'left' : 'right';
   const startDef = getHandShapeDefinition(shapeStart);
   const endDef = getHandShapeDefinition(shapeEnd);
+  // Y 轴外展方向需根据左右手镜像（左手 Y 取反）
+  const sideSign = side === 'left' ? -1 : 1;
 
   const tracks: THREE.QuaternionKeyframeTrack[] = [];
   const times = [0, durationSec];
@@ -801,15 +879,24 @@ function buildFingerTracks(
     const endFinger = endDef.fingers[fingerIndex];
     if (!startFinger || !endFinger) continue;
 
-    const startAngle = joint === 'mcp' ? startFinger.mcp : joint === 'pip' ? startFinger.pip : startFinger.dip;
-    const endAngle = joint === 'mcp' ? endFinger.mcp : joint === 'pip' ? endFinger.pip : endFinger.dip;
+    // 获取三轴角度
+    const startX = joint === 'mcp' ? startFinger.mcp : joint === 'pip' ? startFinger.pip : startFinger.dip;
+    const endX = joint === 'mcp' ? endFinger.mcp : joint === 'pip' ? endFinger.pip : endFinger.dip;
+    const startY = (joint === 'mcp' ? startFinger.mcpY : joint === 'pip' ? startFinger.pipY : startFinger.dipY) ?? 0;
+    const endY = (joint === 'mcp' ? endFinger.mcpY : joint === 'pip' ? endFinger.pipY : endFinger.dipY) ?? 0;
+    const startZ = (joint === 'mcp' ? startFinger.mcpZ : joint === 'pip' ? startFinger.pipZ : startFinger.dipZ) ?? 0;
+    const endZ = (joint === 'mcp' ? endFinger.mcpZ : joint === 'pip' ? endFinger.pipZ : endFinger.dipZ) ?? 0;
 
     const boneNode = humanoid.getNormalizedBoneNode(`${prefix}${boneSuffix}` as never);
     if (!boneNode) continue;
 
-    // 手指屈曲绕本地 X 轴，Y/Z 为 0
-    const startQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(startAngle, 0, 0, 'XYZ'));
-    const endQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(endAngle, 0, 0, 'XYZ'));
+    // 三轴旋转：X 屈曲 + Y 外展（左右手镜像）+ Z 旋转
+    const startQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(startX, startY * sideSign, startZ, 'XYZ'),
+    );
+    const endQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(endX, endY * sideSign, endZ, 'XYZ'),
+    );
     const values = [
       startQuat.x, startQuat.y, startQuat.z, startQuat.w,
       endQuat.x, endQuat.y, endQuat.z, endQuat.w,
@@ -843,6 +930,129 @@ function buildExpressionTrack(
   const values = [1, 1];
 
   return new THREE.NumberKeyframeTrack(`expressionManager.${preset}`, times, values);
+}
+
+/**
+ * 生成头部动作轨道（neck + head 骨骼的 QuaternionKeyframeTrack）
+ *
+ * 根据 HeadMovement 枚举生成对应的关键帧旋转：
+ *   - NOD / SLIGHT_NOD: 绕 X 轴点头（前俯后仰）
+ *   - SHAKE: 绕 Y 轴摇头（左右转动）
+ *   - TILT_LEFT / TILT_RIGHT / TILT: 绕 Z 轴侧头
+ *   - SLIGHT_BOW: 绕 X 轴轻微鞠躬（持续前俯）
+ *
+ * 旋转分配：neck 承担 60%，head 承担 40%，使动作更自然
+ *
+ * @param movement 头部动作枚举
+ * @param vrm VRM 模型实例
+ * @param durationSec 动画时长（秒）
+ * @returns QuaternionKeyframeTrack 数组（neck + head），空数组表示无动作
+ */
+export function buildHeadMovementTrack(
+  movement: HeadMovement,
+  vrm: VRM,
+  durationSec: number,
+): THREE.QuaternionKeyframeTrack[] {
+  if (movement === HeadMovement.NONE) return [];
+
+  const neckNode = vrm.humanoid.getNormalizedBoneNode('neck' as never);
+  const headNode = vrm.humanoid.getNormalizedBoneNode('head' as never);
+  if (!neckNode && !headNode) {
+    log.warn('head_movement: neck and head bones not found');
+    return [];
+  }
+
+  // 旋转幅度（弧度）
+  const NECK_RATIO = 0.6;  // neck 承担 60%
+  const HEAD_RATIO = 0.4;  // head 承担 40%
+
+  // 根据动作类型生成关键帧
+  let axis: 'x' | 'y' | 'z';
+  let amplitudes: number[];  // 归一化幅度序列 [0..1]，实际旋转 = amplitude * maxAngle
+  let maxAngle: number;
+
+  switch (movement) {
+    case HeadMovement.NOD:
+      axis = 'x';
+      maxAngle = degToRad(20);
+      amplitudes = [0, -1, 0, -0.5, 0];  // 下→上→下→恢复
+      break;
+    case HeadMovement.SLIGHT_NOD:
+      axis = 'x';
+      maxAngle = degToRad(12);
+      amplitudes = [0, -1, 0];
+      break;
+    case HeadMovement.SHAKE:
+      axis = 'y';
+      maxAngle = degToRad(20);
+      amplitudes = [0, 1, 0, -1, 0];  // 左→中→右→中
+      break;
+    case HeadMovement.TILT_LEFT:
+      axis = 'z';
+      maxAngle = degToRad(15);
+      amplitudes = [0, 1, 0];
+      break;
+    case HeadMovement.TILT_RIGHT:
+    case HeadMovement.TILT:  // TILT 默认右倾
+      axis = 'z';
+      maxAngle = degToRad(15);
+      amplitudes = [0, -1, 0];
+      break;
+    case HeadMovement.SLIGHT_BOW:
+      axis = 'x';
+      maxAngle = degToRad(18);
+      amplitudes = [0, -1, -1, -0.5];  // 持续前俯，末尾稍恢复
+      break;
+    default:
+      return [];
+  }
+
+  const count = amplitudes.length;
+  const times: number[] = [];
+  for (let i = 0; i < count; i++) {
+    times.push((i / (count - 1)) * durationSec);
+  }
+
+  const tracks: THREE.QuaternionKeyframeTrack[] = [];
+
+  // 生成 neck 轨道
+  if (neckNode) {
+    const quats: number[] = [];
+    for (const amp of amplitudes) {
+      const angle = amp * maxAngle * NECK_RATIO;
+      const euler = axis === 'x'
+        ? new THREE.Euler(angle, 0, 0, 'XYZ')
+        : axis === 'y'
+          ? new THREE.Euler(0, angle, 0, 'XYZ')
+          : new THREE.Euler(0, 0, angle, 'XYZ');
+      const q = new THREE.Quaternion().setFromEuler(euler);
+      quats.push(q.x, q.y, q.z, q.w);
+    }
+    tracks.push(new THREE.QuaternionKeyframeTrack(buildTrackName(neckNode), times, quats));
+  }
+
+  // 生成 head 轨道
+  if (headNode) {
+    const quats: number[] = [];
+    for (const amp of amplitudes) {
+      const angle = amp * maxAngle * HEAD_RATIO;
+      const euler = axis === 'x'
+        ? new THREE.Euler(angle, 0, 0, 'XYZ')
+        : axis === 'y'
+          ? new THREE.Euler(0, angle, 0, 'XYZ')
+          : new THREE.Euler(0, 0, angle, 'XYZ');
+      const q = new THREE.Quaternion().setFromEuler(euler);
+      quats.push(q.x, q.y, q.z, q.w);
+    }
+    tracks.push(new THREE.QuaternionKeyframeTrack(buildTrackName(headNode), times, quats));
+  }
+
+  return tracks;
+}
+
+/** 度转弧度 */
+function degToRad(d: number): number {
+  return (d * Math.PI) / 180;
 }
 
 // ===== 主类 =====
@@ -946,6 +1156,14 @@ export class ClipBuilder {
       const expr = parseFacialExpression(expressionStr);
       const exprTrack = buildExpressionTrack(expr, durationSec);
       if (exprTrack) tracks.push(exprTrack);
+    }
+
+    // 5. 头部动作轨道
+    const headMovementStr = gloss.non_manual?.head_movement;
+    if (headMovementStr) {
+      const headMove = parseHeadMovement(headMovementStr);
+      const headTracks = buildHeadMovementTrack(headMove, vrm, durationSec);
+      tracks.push(...headTracks);
     }
 
     const clip = new THREE.AnimationClip(`gloss_${gloss.gloss_id}`, durationSec, tracks);

@@ -33,10 +33,14 @@ export interface PerformanceReport {
 
 /** 性能监控 Hook */
 export function usePerformanceMonitor(enabled: boolean = true) {
-  const [report, setReport] = useState<PerformanceReport>({
-    vitals: { fcp: null, lcp: null, fid: null, cls: null, ttfb: null },
-    metrics: { tfjsInferenceTime: null, renderFps: null, memoryUsage: null },
-    timestamp: Date.now(),
+  const [report, setReport] = useState<PerformanceReport>(() => {
+    const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
+    const ttfb = navEntry ? navEntry.responseStart - navEntry.requestStart : null;
+    return {
+      vitals: { fcp: null, lcp: null, fid: null, cls: null, ttfb },
+      metrics: { tfjsInferenceTime: null, renderFps: null, memoryUsage: null },
+      timestamp: Date.now(),
+    };
   });
 
   const clsValue = useRef(0);
@@ -46,15 +50,6 @@ export function usePerformanceMonitor(enabled: boolean = true) {
   // 采集 Web Vitals
   useEffect(() => {
     if (!enabled) return;
-
-    // TTFB
-    const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
-    if (navEntry) {
-      setReport((prev) => ({
-        ...prev,
-        vitals: { ...prev.vitals, ttfb: navEntry.responseStart - navEntry.requestStart },
-      }));
-    }
 
     // FCP
     const fcpObserver = new PerformanceObserver((list) => {

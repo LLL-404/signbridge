@@ -53,9 +53,15 @@ export enum HandShape {
 
 /** 手指关节角度（单关节三自由度） */
 export interface FingerPose {
-  mcp: number; // 掌指关节角度
-  pip: number; // 近端指间关节角度
-  dip: number; // 远端指间关节角度
+  mcp: number; // 掌指关节角度（X 轴屈曲）
+  pip: number; // 近端指间关节角度（X 轴屈曲）
+  dip: number; // 远端指间关节角度（X 轴屈曲）
+  mcpY?: number; // 掌指关节 Y 轴外展/内收（手指张开/并拢）
+  mcpZ?: number; // 掌指关节 Z 轴旋转
+  pipY?: number; // 近端指间关节 Y 轴
+  pipZ?: number; // 近端指间关节 Z 轴
+  dipY?: number; // 远端指间关节 Y 轴
+  dipZ?: number; // 远端指间关节 Z 轴
 }
 
 /** 手形定义（5 根手指的关节角度） */

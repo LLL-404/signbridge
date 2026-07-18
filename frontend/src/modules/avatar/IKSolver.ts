@@ -85,9 +85,16 @@ export function solve(
   elbowDir.normalize();
 
   // === 3. 计算上臂方向向量（从肩 S 指向肘 A） ===
-  // 上臂方向 = 绕 elbowDir 将 dir 旋转 -shoulderLift，得到 SA 方向
-  // （"伸直"时 SA 沿 SW 方向；弯肘后 SA 向 elbowDir 一侧偏斜，使末端回到 W）
-  const upperArmDir = dir.clone().applyAxisAngle(elbowDir, -shoulderLift);
+  // 几何推导：肘部在以 dir 为轴、半径 L1*sin(shoulderLift) 的圆上（圆面垂直 dir），
+  // 肘部位置 = S + dir*L1*cos(shoulderLift) + elbowDir*L1*sin(shoulderLift)
+  // 因此 upperArmDir = dir*cos(shoulderLift) + elbowDir*sin(shoulderLift)
+  //
+  // 旧实现用 `dir.applyAxisAngle(elbowDir, -shoulderLift)` 是几何错误：
+  // applyAxisAngle 让结果在垂直于 elbowDir 的平面内，永远无 elbowDir 分量；
+  // 正确公式含 sin(shoulderLift)*elbowDir 分量。旧公式在 A-pose 下因对称性巧合正确，
+  // 在 T-pose（upperRestDir 水平）下产生 X 分量符号反转，手臂伸到身体对侧。
+  const upperArmDir = dir.clone().multiplyScalar(Math.cos(shoulderLift))
+    .add(elbowDir.clone().multiplyScalar(Math.sin(shoulderLift)));
 
   // === 4. 肩部本地旋转：把 rest 方向 (0,-1,0) 旋转到 upperArmDir ===
   const shoulderQuat = new THREE.Quaternion().setFromUnitVectors(
@@ -284,6 +291,7 @@ function applyPoleConstraint(
  * @param side 左/右，决定肘部默认引导方向（左臂 +X，右臂 -X）
  * @param elbowHint 肘引导方向（pole vector），缺省按 side 给出
  * @param iterations 迭代次数，默认 10
+ * @param restDir 骨骼 rest direction（默认 (0,-1,0)），传入实际 rest direction 可提高 VRM 模型精度
  */
 export function solveFABRIK(
   shoulderPos: Vec3,
@@ -293,6 +301,7 @@ export function solveFABRIK(
   side: 'left' | 'right',
   elbowHint?: THREE.Vector3,
   iterations = 10,
+  restDir?: THREE.Vector3,
 ): IKResult {
   const L1 = upperArmLength;
   const L2 = forearmLength;
@@ -360,18 +369,20 @@ export function solveFABRIK(
   }
 
   // === 关节方向 → 欧拉角（与 solve 一致的本地坐标约定）===
-  // shoulder：把 rest(-Y) 旋转到 shoulder→elbow 方向
+  // 使用传入的 restDir 或默认 (0,-1,0)
+  const effectiveRestDir = restDir ?? BONE_REST_DIR;
+  // shoulder：把 rest direction 旋转到 shoulder→elbow 方向
   const upperArmDir = back.subVectors(joints[1], joints[0]).normalize();
-  const shoulderQuat = new THREE.Quaternion().setFromUnitVectors(BONE_REST_DIR, upperArmDir);
+  const shoulderQuat = new THREE.Quaternion().setFromUnitVectors(effectiveRestDir, upperArmDir);
   const shoulderEuler = new THREE.Euler().setFromQuaternion(shoulderQuat, 'XYZ');
 
   // elbow：前臂方向经 inv(shoulder) 转到肩本地，用 setFromUnitVectors 求完整旋转
   // 保留 Y/Z 分量以保证 FK 重建精度（不强制铰链）
   const forearmDir = fwd.subVectors(joints[2], joints[1]);
-  if (forearmDir.lengthSq() < 1e-12) forearmDir.set(0, -1, 0);
+  if (forearmDir.lengthSq() < 1e-12) forearmDir.copy(effectiveRestDir);
   forearmDir.normalize();
   const forearmLocalDir = forearmDir.applyQuaternion(shoulderQuat.clone().invert());
-  const elbowQuat = new THREE.Quaternion().setFromUnitVectors(BONE_REST_DIR, forearmLocalDir);
+  const elbowQuat = new THREE.Quaternion().setFromUnitVectors(effectiveRestDir, forearmLocalDir);
   const elbowEuler = new THREE.Euler().setFromQuaternion(elbowQuat, 'XYZ');
 
   return {

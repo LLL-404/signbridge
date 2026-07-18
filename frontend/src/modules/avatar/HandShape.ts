@@ -16,10 +16,19 @@ const fp = (mcp: number, pip: number, dip: number): FingerPose => ({ mcp, pip, d
  * 角度值参考人体手部自然活动范围，屈曲为正
  */
 const HAND_SHAPE_DEFINITIONS: Record<HandShape, HandShapeDefinition> = {
-  // 张开五指：所有关节伸展
+  // 张开五指：所有关节伸展，五指自然张开（MCP 外展）
   [HandShape.OPEN_5]: {
     shape: HandShape.OPEN_5,
-    fingers: [fp(0, 0, 0), fp(0, 0, 0), fp(0, 0, 0), fp(0, 0, 0), fp(0, 0, 0)],
+    fingers: [
+      fp(0, 0, 0),        // 拇指
+      fp(0, 0, 0),        // 食指
+      fp(0, 0, 0),        // 中指
+      fp(0, 0, 0),        // 无名指
+      fp(0, 0, 0),        // 小指
+    ].map((f, i) => ({
+      ...f,
+      mcpY: [deg(-15), deg(-10), 0, deg(10), deg(20)][i],  // 手指外展
+    })) as [FingerPose, FingerPose, FingerPose, FingerPose, FingerPose],
   },
   // 握拳 A：拇指压在食指上方，其余四指完全屈曲
   [HandShape.FIST_A]: {
@@ -43,13 +52,13 @@ const HAND_SHAPE_DEFINITIONS: Record<HandShape, HandShapeDefinition> = {
       fp(deg(90), deg(100), deg(90)),
     ],
   },
-  // V 形（剪刀手）：食指与中指伸展，其余屈曲
+  // V 形（剪刀手）：食指与中指伸展并分开，其余屈曲
   [HandShape.V_SHAPE]: {
     shape: HandShape.V_SHAPE,
     fingers: [
       fp(deg(20), deg(40), deg(40)),
-      fp(0, 0, 0),
-      fp(0, 0, 0),
+      { ...fp(0, 0, 0), mcpY: deg(-15) },   // 食指外展
+      { ...fp(0, 0, 0), mcpY: deg(15) },    // 中指外展
       fp(deg(90), deg(100), deg(90)),
       fp(deg(90), deg(100), deg(90)),
     ],
@@ -109,15 +118,15 @@ const HAND_SHAPE_DEFINITIONS: Record<HandShape, HandShapeDefinition> = {
       fp(deg(90), deg(100), deg(90)),
     ],
   },
-  // 角手势（摇滚）：食指与小指伸展，其余屈曲
+  // 角手势（摇滚）：食指与小指伸展并外展，其余屈曲
   [HandShape.HORNS]: {
     shape: HandShape.HORNS,
     fingers: [
       fp(deg(20), deg(40), deg(40)),
-      fp(0, 0, 0),
+      { ...fp(0, 0, 0), mcpY: deg(-15) },   // 食指外展
       fp(deg(90), deg(100), deg(90)),
       fp(deg(90), deg(100), deg(90)),
-      fp(0, 0, 0),
+      { ...fp(0, 0, 0), mcpY: deg(20) },    // 小指外展
     ],
   },
   // 以下手形未在 Skeleton3D 中定义，使用合理默认值
@@ -125,10 +134,10 @@ const HAND_SHAPE_DEFINITIONS: Record<HandShape, HandShapeDefinition> = {
     shape: HandShape.FOUR,
     fingers: [
       fp(deg(20), deg(40), deg(40)),
-      fp(0, 0, 0),
-      fp(0, 0, 0),
-      fp(0, 0, 0),
-      fp(0, 0, 0),
+      { ...fp(0, 0, 0), mcpY: deg(-12) },  // 食指外展
+      { ...fp(0, 0, 0), mcpY: deg(-4) },   // 中指微展
+      { ...fp(0, 0, 0), mcpY: deg(4) },    // 无名指微展
+      { ...fp(0, 0, 0), mcpY: deg(12) },   // 小指外展
     ],
   },
   [HandShape.SIX]: {
@@ -257,7 +266,7 @@ const FINGER_BONE_NAMES = [
  * 将 HandShape 转为 VRM 手指骨骼旋转
  * @param shape 手形枚举
  * @param side 'left' | 'right'
- * @returns VRM 骨骼名 → 旋转（仅 X 轴屈曲，Y/Z 为 0）
+ * @returns VRM 骨骼名 → 旋转（X 屈曲 + Y 外展 + Z 旋转）
  */
 export function handShapeToBoneRotations(
   shape: HandShape,
@@ -274,9 +283,23 @@ export function handShapeToBoneRotations(
 
     // 拇指：mcp→Metacarpal, pip→Proximal, dip→Distal
     // 其他指：mcp→Proximal, pip→Intermediate, dip→Distal
-    result[`${prefix}${baseName}`] = { x: finger.mcp, y: 0, z: 0 };
-    result[`${prefix}${midName}`] = { x: finger.pip, y: 0, z: 0 };
-    result[`${prefix}${tipName}`] = { x: finger.dip, y: 0, z: 0 };
+    // Y 轴外展方向需根据左右手镜像（左手 Y 取反）
+    const sideSign = side === 'left' ? -1 : 1;
+    result[`${prefix}${baseName}`] = {
+      x: finger.mcp,
+      y: (finger.mcpY ?? 0) * sideSign,
+      z: finger.mcpZ ?? 0,
+    };
+    result[`${prefix}${midName}`] = {
+      x: finger.pip,
+      y: (finger.pipY ?? 0) * sideSign,
+      z: finger.pipZ ?? 0,
+    };
+    result[`${prefix}${tipName}`] = {
+      x: finger.dip,
+      y: (finger.dipY ?? 0) * sideSign,
+      z: finger.dipZ ?? 0,
+    };
   });
 
   return result;

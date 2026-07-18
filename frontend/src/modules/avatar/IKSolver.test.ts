@@ -236,6 +236,25 @@ describe('solveFABRIK', () => {
     const err = wrist.distanceTo(new THREE.Vector3(target.x, target.y, target.z));
     expect(err).toBeLessThanOrEqual(1e-3);
   });
+
+  it('传入 restDir 应影响求解结果（T-pose 水平臂 vs 默认垂直臂）', () => {
+    const shoulder = { x: 0, y: 0.5, z: 0 };
+    const target = { x: 0.3, y: 0.3, z: 0 };
+    const L1 = 0.28, L2 = 0.26;
+
+    // 默认 rest direction (0,-1,0) — 垂直向下
+    const resultDefault = solveFABRIK(shoulder, target, L1, L2, 'right', undefined, 10);
+
+    // T-pose rest direction (1,0,0) — 水平向外（VRM T-pose 上臂方向）
+    const restDirTPose = new THREE.Vector3(1, 0, 0);
+    const resultTPose = solveFABRIK(shoulder, target, L1, L2, 'right', undefined, 10, restDirTPose);
+
+    // 两种 rest direction 应产生不同的肩部旋转
+    const diff = Math.abs(resultDefault.shoulderRotation.x - resultTPose.shoulderRotation.x)
+                + Math.abs(resultDefault.shoulderRotation.y - resultTPose.shoulderRotation.y)
+                + Math.abs(resultDefault.shoulderRotation.z - resultTPose.shoulderRotation.z);
+    expect(diff).toBeGreaterThan(0.01);
+  });
 });
 
 describe('solveFABRIKMultiChain', () => {

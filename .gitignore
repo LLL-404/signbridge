@@ -34,3 +34,6 @@ Thumbs.db
 # 开发服务器配置
 *.tsbuildinfo
 AccessKey.txt
+
+# 临时上传文件（浏览器自动化调试产物）
+.tmp-upload/

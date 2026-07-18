@@ -8,6 +8,23 @@
 
 ## [Unreleased]
 
+### 🔧 修复
+- fix(lint): 修复 3 个 ESLint error——ClipBuilder.ts:445 `let elbowHint` 改为 `const`（prefer-const）；usePerformanceMonitor.ts:53 TTFB 计算移入 useState lazy initializer 消除 set-state-in-effect；AvatarCanvas.tsx:127 WebGL 检测移入 useState lazy initializer 消除 set-state-in-effect。`npx eslint .` 退出码 0（0 errors, 12 warnings）
+- fix(avatar): 修复解析法 IK 上臂方向公式几何错误——`dir.applyAxisAngle(elbowDir, -shoulderLift)` 在垂直于 elbowDir 的平面内旋转，结果永远无 elbowDir 分量；正确公式为 `dir*cos(shoulderLift) + elbowDir*sin(shoulderLift)`（肘部在 elbowDir 方向偏移 L1*sin(shoulderLift)）。旧公式在 A-pose 下因对称性巧合正确，VRM T-pose 下对称性破坏导致 upperArmDir X 分量符号反转，右手臂伸到身体对侧（「他/谢谢/对不起」实测肘部穿透躯干）。ClipBuilder.ts 与 IKSolver.ts 同步修复，真实 VRM 模型集成测试 74 项全部通过
+- fix(avatar): TAP/TAP_TWICE 运动轨迹从离散跳跃改为正弦波平滑过渡，消除 IK 解分支跳跃导致的动画抖动（wave/tap_twice 类词汇相邻帧旋转差异从 78° 降至 ≤60°）
+- fix(avatar): ClipBuilder.buildArmTracks 新增 IK 解时序平滑后处理，检测相邻帧 lowerQuat 旋转差异 >60° 时用 SLERP 插值修正，解决 setFromUnitVectors 最短旋转在奇异点附近的分支跳跃问题
+
+### ✨ 新增
+- feat(avatar): 新增真实 VRM 模型集成测试（ClipBuilder.real-vrm-integration.test.ts），加载项目实际 avatar.vrm 文件（10.7MB），用 AnimationMixer.setTime() 在关键时间点采样骨骼世界位置，覆盖 8 个验证维度 × 12 个词汇 = 74 个测试：VRM 加载、手指骨骼、手臂轨道、手腕世界位置合理性、上臂/前臂旋转 ROM、肘部穿透检测、NaN 检测。从 mock VRM 升级到真实 VRM 后发现了 mock 测试无法发现的 IK 几何缺陷
+
+### ✨ 新增
+- feat(avatar): ClipBuilder 新增头部动作轨道生成（buildHeadMovementTrack），VRM 模式下 head_movement（nod/shake/tilt/slight_bow 等）不再丢失，neck 承担 60%、head 承担 40% 旋转使动作更自然
+- feat(avatar): HandShape 手指骨骼支持 Y/Z 轴旋转（外展/内收），OPEN_5/V_SHAPE/HORNS/FOUR 等手形增加手指外展角度，左手 Y 轴自动镜像
+- feat(avatar): FingerPose 类型扩展 mcpY/mcpZ/pipY/pipZ/dipY/dipZ 可选字段，向后兼容现有手形定义
+
+### 🔧 修复
+- fix(avatar): solveFABRIK 新增可选 restDir 参数，不再硬编码 BONE_REST_DIR=(0,-1,0)，ClipBuilder 传入 VRM 实际骨骼 rest direction 提高 IK 精度
+
 ### ✨ 新增
 - feat(grammar): 时态助词"了/着/过"分词识别与非手语标记——Tokenizer PARTICLES 词表增加时态助词，NonManualMarker 新增完成体（了→slight_nod）/持续体（着）/经历体（过→shake）检测，优先级：疑问>否定>强调>时态>陈述；6 个演示句子（我今天吃饭了/你好朋友/谢谢老师/我想喝水/他明天来/我们是学生）端到端验证全部通过
 - feat(data): 扩充餐饮/趋向类高频词条 7 个（过来/吃饭/饭/喝/菜/饱/渴），词汇库覆盖基本餐饮场景，修复「过来吃饭」等日常短语识别失败
@@ -55,6 +72,8 @@
 - fix(avatar): 放宽 Skeleton3D 的 FINGER_LENGTHS 类型为 number[] 修复元组类型不匹配
 
 ### 📦 维护
+- chore: 从 git 跟踪移除 .tmp-upload/ 目录全部 578 个临时文件（浏览器自动化调试截图与 Python 脚本），在 .gitignore 中添加 .tmp-upload/ 忽略规则
+- chore(ci): CI 流水线新增"代码规范检查"步骤（npm run lint），在类型检查后执行 ESLint，防止 lint error 合并到 master
 - chore(competition): 提交 TRAE AI 创造力大赛初赛 Demo 帖（https://forum.trae.cn/t/topic/167826），发布报名帖（https://forum.trae.cn/t/topic/167778），README.md 参赛信息更新为"初赛 Demo 已提交"，补充 GitHub Pages 体验地址（https://LLL-404.github.io/signbridge/）与仓库地址
 - chore: 迁移文档到 docs/ 目录
 - chore: 清理测试文件和临时资源
