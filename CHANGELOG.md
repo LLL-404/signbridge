@@ -9,6 +9,9 @@
 ## [Unreleased]
 
 ### ✨ 新增
+- feat(perf): 加载性能优化工程——针对生产环境移动端/弱网下首屏白屏与路由切换卡顿，从 5 个维度组合优化（详见 `.trae/specs/loading-performance-optimization/`）；新增 11 个 VRMCache 单元测试，单元测试总数从 809 提升至 820，全部通过；4 个子 Agent 并行实施 + 交叉验证
+- feat(avatar): 新增 VRMCache.ts IndexedDB 持久化模块——三级加载优先级（内存缓存 → IndexedDB → HTTP），独立 IDB 封装（`signbridge-vrm-cache` 数据库 + `vrm_cache` store），VRM 10.7MB 首次加载后持久化，二次访问从 IndexedDB 秒开；失败时 try-catch 回退到 HTTP；导出 `loadVRM(url)` / `clearVRMCache(url?)` / `clearVRMCachePersistent(url?)` 统一接口
+- feat(ui): 新增 PageSkeleton.tsx 通用骨架屏组件——复用 Layout 框架结构（Sidebar w-60 + Header h-16 + 主内容区卡片网格 pulse 动画）；默认导出 `PageSkeleton`（完整骨架）+ 命名导出 `MainContentSkeleton`（仅内容区，供 routes.tsx Suspense fallback 复用，避免与 Layout 已渲染的 Sidebar/Header 重复）；所有占位容器加 `aria-hidden="true"`
 - feat(test): 补全 6 个核心模块单元测试，新增 134 个测试用例（JointLimits 36 个、KalidokitSolver 16 个、MixamoRetargeter 14 个、DataCollector 32 个、ModelTrainer 12 个、TrainingDataGenerator 24 个）；单元测试总数从 675 提升至 809，全部通过；通过 vi.mock 隔离 Three.js/TF.js/VRM/IndexedDB/Worker 等外部依赖
 - feat(pwa): PWA 离线支持——使用 vite-plugin-pwa 配置 manifest（name='手语桥 SignBridge'）、service worker（generateSW 模式）、runtime caching 策略（VRM 模型 CacheFirst 30 天、vocabulary.json NetworkFirst 7 天、CDN 资源 CacheFirst/StaleWhileRevalidate）；预缓存 35 个条目（4690 KiB）；新增 PWA 图标 192x192/512x512 PNG + 图标生成脚本；index.html 添加 apple-touch-icon 和 manifest 链接
 - feat(a11y): 可访问性增强——index.html 添加 `lang="zh-CN"` 和 description meta；Header/Sidebar/Layout 添加 ARIA 标签（aria-label、aria-controls、aria-expanded）、语义化结构（`<aside>`、`<nav>`、`<main>`）；4 个页面（VoiceToSign/SignToText/Dialogue/Learning）添加 aria-live 状态播报、role="status"/"alert"、aria-pressed、aria-valuemin/max/now；LearningPage 模式切换实现标准 ARIA tabs 模式（role="tablist"/"tab"/"tabpanel" + roving tabindex）；装饰性图标/emoji 添加 aria-hidden；Sidebar 抽屉支持 Escape 键关闭
@@ -22,6 +25,11 @@
 - fix(stgcn): GraphConvLayer.call() 梯度计算修复——TF.js 4.22.0 中 3D×2D BatchMatMul 梯度形状不匹配、Einsum op 无梯度函数；改用 2D matMul + reshape/transpose 链（X@W 展平为 (B*F*N, inCh)×(inCh, outCh)，A@XW 转置让 N 成首维）；邻接矩阵缓存改为纯 number[][] 数据避免跨 tf.tidy scope 引用导致的 moveData backend 错误
 
 ### ⚡ 性能
+- perf(build): vite.config.ts manualChunks vendor 细分——three-vendor 833KB 拆分为 `three-core` (684KB, three/build 核心) + `three-examples` (94KB, GLTFLoader/FBXLoader) + `three-vrm` (138KB, @pixiv/three-vrm) + `react-three` (147KB, @react-three/fiber+drei)；tfjs-vendor 1.6MB 拆分为 `tfjs-core` (584KB) + `tfjs-backend` (528KB) + `tfjs-converter` (3.6KB) + `tfjs-other` (485KB)；移除 5 个业务 module 分包让 Vite 默认按路由自动拆分；首屏不进 3D 页面时仅需 react-vendor + main + state-vendor + 页面 chunk
+- perf(pwa): PWA 预缓存精简——`globPatterns` 移除 `png/svg/wasm` 只保留 `js/css/html/ico/woff2`；`globIgnores` 新增 `**/pwa-*.png` 双保险；新增 `maximumFileSizeToCacheInBytes: 2MB` 上限避免大文件预缓存拖慢首次访问；VRM/图标/词汇数据保留运行时缓存配置不变
+- perf(boot): 首屏关键路径瘦身——`main.tsx` 移除同步 `runVocabularyValidationOnStartup` 调用，改为 App.tsx useEffect 中动态 import（仅 dev 环境）；`App.tsx` 中 `PerformancePanel` 改为 `React.lazy`，仅 Ctrl+Shift+P 按下时加载；启动期 `pluginsReady=false` 显示骨架屏（PageSkeleton）替代 spinner；`index.html` 内联 critical CSS（dark theme 背景 + splash 动画 + 字体栈），弱网下 splash 无闪烁
+- perf(route): 路由预加载 + 骨架屏——`Sidebar.tsx` 菜单项添加 `onMouseEnter` / `onFocus` / `onTouchStart` 事件触发对应 chunk 预加载，`useRef<Set<string>>` 节流避免重复预加载，跳过当前已激活路由；`routes.tsx` Suspense fallback 从 spinner 改为 `MainContentSkeleton`（仅内容区骨架，复用 Layout 已渲染的 Sidebar/Header）
+- perf(avatar): VRM 分级加载 + IndexedDB 持久化——`VRMModel.tsx` 改用 `VRMCache.loadVRM()` 替换模块级 `loadVRMCached`；`Avatar3D.tsx` 新增 `lowPolyModelUrl` prop 预留接口（当前未使用），VRM 加载期间渲染 `<SkeletonAvatarModel>` 占位提供即时姿态反馈，VRM 加载完成后（`vrmLoaded=true`）自动移除 skeleton；VRM 二次访问从 IndexedDB 秒开（10.7MB → 0ms）
 - perf: VRM 模型懒加载验证通过——`Avatar3D.tsx` 使用 `LazyVRMModel = lazy(() => import('./VRMModel'))` 异步加载，首屏不请求 10.7MB 的 `models/avatar.vrm` 文件，仅当导航到 `/voice-to-sign` 等使用 3D 化身的页面时才加载
 - perf: Lighthouse 性能审计达成目标（desktop 预设）——Performance 评分 100，LCP 788ms（< 800ms 阈值），FCP 521ms（< 1.5s 阈值），TBT 0ms，CLS 0；首屏 JS/CSS 资源加载时间约 1.5s，主要受 Three.js（962KB）和 TF.js（1.59MB）vendor chunk 影响
 
@@ -29,6 +37,7 @@
 - fix(e2e): 修复 E2E 测试超时失败（2/14 → 14/14 通过）——「应能导航到各功能页面」和「应显示双面板布局」测试默认 30s 超时不足，提升至 `test.setTimeout(60000)`，导航改用 `waitUntil: 'domcontentloaded'`，缩短中间步骤 `waitForTimeout`，添加 `page.locator('body').waitFor({ state: 'attached', timeout: 30000 })` 等待页面就绪
 
 ### 📦 维护
+- chore(spec): 新增 `.trae/specs/loading-performance-optimization/` spec 三件套（spec.md / tasks.md / checklist.md）——记录加载性能优化的需求、设计、任务划分（11 个 task 按 4 个子 Agent 分组）、20 个验收点；spec NFR-4 调整为 PWA 预缓存 ≤ 5 MiB（原 < 1 MiB 在 js 总量约 4.5MB 约束下不现实）
 - chore(deps): 新增 `@tensorflow/tfjs-node@4.22.0` 作为 devDependency，仅用于 Node.js 环境训练 ST-GCN 模型（原生 C++ 后端，oneDNN 优化 + AVX2 指令集）；vite.config.ts 配置 `optimizeDeps.exclude: ['@tensorflow/tfjs-node']` 确保不进入浏览器生产 bundle
 - chore: `frontend/.gitignore` 新增 tfjs-node 构建缓存忽略规则（`.cache/`）
 - chore(ci): CI 流水线新增 E2E 测试步骤——在单元测试后添加 `npx playwright install chromium --with-deps` 安装浏览器、`npx playwright test` 执行测试、`actions/upload-artifact@v4` 上传 `playwright-report`（保留 7 天，`if: ${{ !cancelled() }}` 确保失败时也上传）

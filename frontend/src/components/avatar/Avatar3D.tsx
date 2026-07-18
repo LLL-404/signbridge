@@ -35,6 +35,11 @@ export interface Avatar3DProps {
   mode?: AvatarMode;
   /** VRM 模型路径（mode='vrm' 时使用，public 目录下的相对路径） */
   modelUrl?: string;
+  /**
+   * 低多边形占位模型路径（预留扩展接口，当前未使用）
+   * 未来可用于 VRM 加载完成前先加载轻量级模型快速展示
+   */
+  lowPolyModelUrl?: string;
   /** VRM 模式加载完成回调，同时传递 VRM 和 VRMAnimator 实例 */
   onVRMLoaded?: (vrm: VRM, animator: VRMAnimator) => void;
   /** VRM 模式加载失败回调，上层可据此降级到 2D 模式 */
@@ -164,12 +169,15 @@ export default function Avatar3D({
   className,
   mode = 'vrm',
   modelUrl = `${import.meta.env.BASE_URL}models/avatar.vrm`,
+  lowPolyModelUrl: _lowPolyModelUrl,
   onVRMLoaded,
   onVRMLoadError,
 }: Avatar3DProps) {
   const currentPose = pose ?? NEUTRAL_POSE;
   // VRM 加载错误状态：用于在 Canvas 上层叠加错误提示
   const [loadError, setLoadError] = useState<Error | null>(null);
+  // VRM 加载完成标志：未完成时同时渲染 skeleton 占位，提供即时视觉反馈
+  const [vrmLoaded, setVrmLoaded] = useState(false);
 
   const mergedStyle: CSSProperties = { width, height, ...containerStyle };
 
@@ -179,8 +187,9 @@ export default function Avatar3D({
     onVRMLoadError?.(error);
   };
 
-  // VRM 加载成功时清除错误状态
+  // VRM 加载成功时清除错误状态并标记完成（移除 skeleton 占位）
   const handleVRMLoaded = (vrm: VRM, animator: VRMAnimator) => {
+    setVrmLoaded(true);
     setLoadError(null);
     onVRMLoaded?.(vrm, animator);
   };
@@ -228,15 +237,20 @@ export default function Avatar3D({
 
         {/* 渲染模式 */}
         {mode === 'vrm' ? (
-          <Suspense fallback={null}>
-            <VRMAvatarModel
-              pose={currentPose}
-              vrmPose={vrmPose}
-              modelUrl={modelUrl}
-              onLoaded={handleVRMLoaded}
-              onLoadError={handleVRMLoadError}
-            />
-          </Suspense>
+          <>
+            {/* VRM 加载期间同时渲染 skeleton 占位，提供即时姿态反馈 */}
+            {/* VRM 加载完成后（vrmLoaded===true）移除 skeleton，仅渲染 VRM */}
+            <Suspense fallback={null}>
+              <VRMAvatarModel
+                pose={currentPose}
+                vrmPose={vrmPose}
+                modelUrl={modelUrl}
+                onLoaded={handleVRMLoaded}
+                onLoadError={handleVRMLoadError}
+              />
+            </Suspense>
+            {!vrmLoaded && <SkeletonAvatarModel pose={currentPose} />}
+          </>
         ) : (
           <SkeletonAvatarModel pose={currentPose} />
         )}

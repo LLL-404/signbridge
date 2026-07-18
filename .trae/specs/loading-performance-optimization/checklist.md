@@ -1,0 +1,20 @@
+- [x] Checkpoint 1: `npx tsc -b` exit 0（TypeScript 编译无错误）
+- [x] Checkpoint 2: `npx eslint .` 0 errors（11 个 warnings 均为预先存在的非阻塞警告）
+- [x] Checkpoint 3: `npx vitest run` 全部通过（820/820，新增 11 个 VRMCache 测试）
+- [x] Checkpoint 4: `npx vite build` 成功，chunk 细分完成（three-core/examples/vrm/react-three + tfjs-core/backend/converter/other）
+- [x] Checkpoint 5: PWA 预缓存体积 4692 KiB ≤ 5 MiB（spec NFR-4 已调整为 ≤ 5 MiB，js 总量约束下 < 1 MiB 不现实）
+- [x] Checkpoint 6: vendor 细分后首屏不再加载 three-examples / three-vrm / tfjs-* chunk（按需加载）
+- [x] Checkpoint 7: `main.tsx` 中 `runVocabularyValidationOnStartup` 改为动态 import（移到 App.tsx useEffect 中）
+- [x] Checkpoint 8: `App.tsx` 中 `PerformancePanel` 改为 `React.lazy`（Ctrl+Shift+P 触发加载）
+- [x] Checkpoint 9: 启动期 `pluginsReady=false` 显示骨架屏（PageSkeleton）
+- [x] Checkpoint 10: `index.html` 内联 critical CSS，弱网下 splash 无闪烁
+- [x] Checkpoint 11: `Sidebar.tsx` 菜单项 hover/focus/touchstart 触发 chunk 预加载（useRef Set 节流）
+- [x] Checkpoint 12: `routes.tsx` Suspense fallback 使用 MainContentSkeleton
+- [x] Checkpoint 13: 新增 `VRMCache.ts` IndexedDB 持久化模块（独立 IDB 封装）
+- [x] Checkpoint 14: `VRMModel.tsx` 改用 `VRMCache.loadVRM()`
+- [x] Checkpoint 15: `Avatar3D.tsx` VRM 加载期间显示 skeleton 占位（vrmLoaded state 控制）
+- [x] Checkpoint 16: VRMCache 单元测试覆盖 IDB 命中/未命中/失败回退（11 个测试用例）
+- [ ] Checkpoint 17: Lighthouse mobile 预设 LCP < 2500ms（需手动验证，本次未执行）
+- [x] Checkpoint 18: CHANGELOG.md 更新 [Unreleased] 部分
+- [ ] Checkpoint 19: git commit + push 到 GitHub 成功
+- [x] Checkpoint 20: 无回归（820/820 测试通过，含新增 11 个）

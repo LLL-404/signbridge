@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { NavLink } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { pluginManager } from '@/kernel';
 
 interface SidebarProps {
@@ -9,6 +9,27 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const navItems = pluginManager.getMenuItems();
+  const location = useLocation();
+  // 已预加载的路由集合，避免重复预加载（hover/focus/touch 多次触发时只下载一次 chunk）
+  const prefetchedRoutesRef = useRef<Set<string>>(new Set());
+
+  /**
+   * 路由预加载：触发对应 chunk 下载，提升用户点击后的首屏速度
+   * - 跳过当前路由（已加载）
+   * - 跳过已预加载的路由（节流）
+   * - 直接调用 component()，浏览器会自动调度网络请求
+   */
+  const prefetchRoute = (routePath: string) => {
+    if (location.pathname.includes(routePath)) return;
+    if (prefetchedRoutesRef.current.has(routePath)) return;
+    prefetchedRoutesRef.current.add(routePath);
+
+    const routeConfig = pluginManager.getRoutes().find((r) => r.path === routePath);
+    if (routeConfig) {
+      // void 标记：故意不 await，仅触发 chunk 下载
+      void routeConfig.component();
+    }
+  };
 
   // 移动端抽屉模式下：按 Escape 键关闭侧边栏（键盘可访问性）
   useEffect(() => {
@@ -42,6 +63,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             key={item.id}
             to={item.route}
             onClick={onClose}
+            // 预加载触发时机：鼠标悬停（桌面端）/ 键盘聚焦（a11y）/ 触摸开始（移动端）
+            onMouseEnter={() => prefetchRoute(item.route)}
+            onFocus={() => prefetchRoute(item.route)}
+            onTouchStart={() => prefetchRoute(item.route)}
             className={({ isActive }) =>
               `relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all ${
                 isActive

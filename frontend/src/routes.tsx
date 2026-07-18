@@ -13,17 +13,16 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
+import { MainContentSkeleton } from '@/components/common/PageSkeleton';
 import { pluginManager } from '@/kernel';
 import type { RouteConfig } from '@/kernel';
 
-/** 路由加载占位 */
+/**
+ * 路由加载占位
+ * 复用 PageSkeleton 的主内容区骨架（不含 Sidebar/Header，因为 Layout 已渲染）
+ */
 function RouteLoading() {
-  return (
-    <div className="flex h-64 flex-col items-center justify-center gap-3">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-accent-500 border-t-transparent" />
-      <p className="text-sm text-content-muted">页面加载中...</p>
-    </div>
-  );
+  return <MainContentSkeleton />;
 }
 
 /** 将插件贡献的 RouteConfig 转为 React.lazy 组件 */

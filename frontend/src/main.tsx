@@ -8,16 +8,15 @@
  *   - 引入全局样式 global.css（Tailwind 基础层 + 自定义动画）
  *
  * 渲染树：main.tsx → App → BrowserRouter → AppRoutes → 各业务页面
+ *
+ * 注意：词汇数据校验（runVocabularyValidationOnStartup）已移至 App.tsx 的 useEffect
+ *       中异步执行，避免阻塞首屏渲染。此处仅保留最小同步依赖。
  */
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '@/App';
 import '@/styles/global.css';
-import { runVocabularyValidationOnStartup } from '@/modules/data/validateVocabulary';
-
-// 开发环境启动时校验词汇数据
-runVocabularyValidationOnStartup();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

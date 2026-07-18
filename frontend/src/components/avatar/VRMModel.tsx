@@ -23,50 +23,17 @@
 import { useRef, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { VRMLoaderPlugin, VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
+import { VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
 import { VRMAnimator } from '@/modules/avatar/VRMAnimator';
 import { VRMAdapter } from '@/modules/avatar/VRMAdapter';
 import { RealtimePoseDriver } from '@/modules/avatar/RealtimePoseDriver';
 import { extractVRMCConstraints, setVRMConstraintCache } from '@/modules/avatar/JointLimits';
+import { loadVRM } from '@/modules/avatar/VRMCache';
 import type { PoseEstimate } from '@/modules/recognition/PoseEstimator';
 import type { BonePose, VRMPose } from '@/types/avatar';
 import { logger } from '@/modules/debug/logger';
 
 const log = logger.module('VRMModel');
-
-/**
- * VRM 加载缓存：防止 React StrictMode 双重渲染导致重复加载
- * 同一 URL 只发起一次 GLTFLoader.load 请求，后续调用复用 Promise
- */
-const vrmLoadCache = new Map<string, Promise<VRM>>();
-
-function loadVRMCached(url: string): Promise<VRM> {
-  const cached = vrmLoadCache.get(url);
-  if (cached) return cached;
-  const promise = new Promise<VRM>((resolve, reject) => {
-    const loader = new GLTFLoader();
-    loader.register((parser) => new VRMLoaderPlugin(parser));
-    loader.load(
-      url,
-      (gltf) => {
-        const vrm = gltf.userData.vrm as VRM;
-        if (!vrm) { reject(new Error('VRM data not found in gltf')); return; }
-        resolve(vrm);
-      },
-      undefined,
-      (err) => reject(err),
-    );
-  });
-  vrmLoadCache.set(url, promise);
-  // 加载失败时清除缓存，允许后续重试（如用户点击"重试"按钮）
-  promise.catch(() => {
-    if (vrmLoadCache.get(url) === promise) {
-      vrmLoadCache.delete(url);
-    }
-  });
-  return promise;
-}
 
 /**
  * 设置 VRM 上肢自然下垂姿态，覆盖默认绑定姿态（T-pose 双臂平举）。
@@ -199,13 +166,12 @@ export function VRMModel({
   }, [useRealtimeTracking, realtimePoseEstimate]);
 
   // 异步加载 VRM
-  // 使用模块级 loadVRMCached 缓存加载 Promise：React StrictMode 双重渲染时，
-  // 两次 useEffect 会复用同一个 Promise，避免 GLTFLoader 重复发起请求导致
-  // 首次请求被浏览器取消（ERR_ABORTED）
+  // 使用 VRMCache.loadVRM 统一加载入口：内部实现内存缓存 + IndexedDB 持久化 + HTTP 回退
+  // React StrictMode 双重渲染时，两次 useEffect 会复用同一个 Promise，避免重复请求
   useEffect(() => {
     let cancelled = false;
 
-    loadVRMCached(modelUrl)
+    loadVRM(modelUrl)
       .then((vrm) => {
         if (cancelled) return;
 

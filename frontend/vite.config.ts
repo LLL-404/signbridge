@@ -8,12 +8,19 @@
  *   - server.port: 5173（开发服务器端口）
  *   - build.rollupOptions.output.manualChunks: 分包策略
  *
- * 分包策略（manualChunks）—— 配合微内核按需加载：
- *   - react-vendor:    React 核心，首屏必载，体积小（~165KB）
- *   - three-vendor:    Three.js 3D 渲染，仅 avatar 插件需要（~833KB）
- *   - tfjs-vendor:     TensorFlow.js，仅 LSTM 识别模式需要（~1.6MB）
- *   - mediapipe-vendor: MediaPipe Hands，识别插件需要（~125KB）
- *   - state-vendor:    Zustand 状态管理（~4KB）
+ * 分包策略（manualChunks）—— 配合微内核按需加载，按依赖体积与加载时机细分：
+ *   - react-vendor:     React 核心，首屏必载，体积小
+ *   - three-core:       Three.js 核心库（three/build），avatar 插件需要
+ *   - three-examples:   Three.js 附加模块（GLTFLoader/FBXLoader 等，大文件）
+ *   - three-vrm:        @pixiv/three-vrm，VRM 模型加载
+ *   - react-three:      @react-three/fiber + @react-three/drei
+ *   - tfjs-core:        @tensorflow/tfjs-core
+ *   - tfjs-backend:     @tensorflow/tfjs-backend-webgl（识别模式需要）
+ *   - tfjs-converter:   @tensorflow/tfjs-converter（模型格式转换）
+ *   - tfjs-other:       其他 @tensorflow/* 子包
+ *   - mediapipe-vendor: MediaPipe Hands，识别插件需要
+ *   - state-vendor:     Zustand 状态管理
+ *   业务模块不再手动分包，由 Vite 默认按路由自动拆分。
  *
  * 性能效果：首屏 gzip 从单体 622KB 降至 ~55KB，大依赖延迟到对应插件加载时才拉取。
  *
@@ -86,9 +93,12 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // 预缓存资源类型：补充 woff2 字体与 vrm 模型
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,wasm}'],
-        globIgnores: ['**/data/vocabulary.json', '**/models/*.vrm'],
+        // 预缓存资源类型：仅核心静态资源，png/svg/wasm 由 runtimeCaching 按需拉取
+        // 移除 wasm：tfjs-backend-webgl 的 wasm 文件较大且仅在识别功能激活时需要
+        globPatterns: ['**/*.{js,css,html,ico,woff2}'],
+        globIgnores: ['**/data/vocabulary.json', '**/models/*.vrm', '**/pwa-*.png'],
+        // 单文件预缓存上限 2MB，避免大文件拖慢首次访问
+        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
         navigateFallback: process.env.GITHUB_PAGES ? '/signbridge/index.html' : '/index.html',
         runtimeCaching: [
           {
@@ -153,14 +163,35 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router')) {
+          // react-vendor: React 核心，首屏必载
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/react-router')) {
             return 'react-vendor'
           }
-          if (id.includes('node_modules/three') || id.includes('node_modules/@react-three') || id.includes('node_modules/@pixiv/three-vrm')) {
-            return 'three-vendor'
+          // 以下 three 相关分包：必须先匹配 @react-three 与 @pixiv/three-vrm，再匹配 three/build 与 three/examples，最后兜底 three
+          if (id.includes('node_modules/@react-three/fiber') || id.includes('node_modules/@react-three/drei')) {
+            return 'react-three'
           }
-          if (id.includes('node_modules/@tensorflow')) {
-            return 'tfjs-vendor'
+          if (id.includes('node_modules/@pixiv/three-vrm')) {
+            return 'three-vrm'
+          }
+          if (id.includes('node_modules/three/build/')) {
+            return 'three-core'
+          }
+          if (id.includes('node_modules/three/examples/jsm')) {
+            return 'three-examples'
+          }
+          // 以下 tfjs 相关分包：必须先匹配具体子包，再用 @tensorflow 通配兜底
+          if (id.includes('node_modules/@tensorflow/tfjs-core')) {
+            return 'tfjs-core'
+          }
+          if (id.includes('node_modules/@tensorflow/tfjs-backend-webgl')) {
+            return 'tfjs-backend'
+          }
+          if (id.includes('node_modules/@tensorflow/tfjs-converter')) {
+            return 'tfjs-converter'
+          }
+          if (id.includes('node_modules/@tensorflow/')) {
+            return 'tfjs-other'
           }
           if (id.includes('node_modules/@mediapipe')) {
             return 'mediapipe-vendor'
@@ -168,21 +199,7 @@ export default defineConfig({
           if (id.includes('node_modules/zustand')) {
             return 'state-vendor'
           }
-          if (id.includes('src/modules/avatar/') && (id.includes('VRM') || id.includes('vrm'))) {
-            return 'vrm-module'
-          }
-          if (id.includes('src/modules/recognition/')) {
-            return 'recognition-module'
-          }
-          if (id.includes('src/modules/grammar/')) {
-            return 'grammar-module'
-          }
-          if (id.includes('src/modules/data/')) {
-            return 'data-module'
-          }
-          if (id.includes('src/modules/learning/')) {
-            return 'learning-module'
-          }
+          // 业务模块（avatar/recognition/grammar/data/learning）不再手动分包，由 Vite 默认按路由自动拆分
         },
       },
     },
