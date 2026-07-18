@@ -22,6 +22,7 @@
 ### 📦 维护
 - chore(ci): CI 流水线新增 E2E 测试步骤——在单元测试后添加 `npx playwright install chromium --with-deps` 安装浏览器、`npx playwright test` 执行测试、`actions/upload-artifact@v4` 上传 `playwright-report`（保留 7 天，`if: ${{ !cancelled() }}` 确保失败时也上传）
 - chore: `frontend/.gitignore` 新增 Playwright 测试产物忽略规则（`test-results/`、`playwright-report/`），避免测试报告被误提交
+- chore: `frontend/.gitignore` 新增 Lighthouse 审计产物忽略规则（`lighthouse-result.json`），该文件含 localhost URL/fetchTime/user agent 等环境相关数据，属可再生构建产物
 
 ### 🔧 修复
 - fix(lint): 修复 3 个 ESLint error——ClipBuilder.ts:445 `let elbowHint` 改为 `const`（prefer-const）；usePerformanceMonitor.ts:53 TTFB 计算移入 useState lazy initializer 消除 set-state-in-effect；AvatarCanvas.tsx:127 WebGL 检测移入 useState lazy initializer 消除 set-state-in-effect。`npx eslint .` 退出码 0（0 errors, 12 warnings）
