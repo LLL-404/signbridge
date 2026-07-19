@@ -34,8 +34,6 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="format-detection" content="telephone=no" />
     <title>手语桥 SignBridge</title>
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-    <link rel="dns-prefetch" href="https://storage.googleapis.com" />
     <style>
       /* critical CSS：弱网下保证首屏不闪烁，与 global.css 加载前保持视觉一致 */
       :root {
@@ -87,13 +85,13 @@
     <div id="root"></div>
     <script type="module">
       import('/src/main.tsx').then(function() {
-        setTimeout(function() {
+        requestAnimationFrame(function() {
           var splash = document.getElementById('app-splash');
           if (splash) {
             splash.classList.add('hidden');
             setTimeout(function() { splash.remove(); }, 300);
           }
-        }, 100);
+        });
       });
     </script>
   </body>

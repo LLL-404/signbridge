@@ -18,6 +18,7 @@ playwright-report/
 
 # Lighthouse 审计产物
 lighthouse-result.json
+lighthouse-mobile-*.json
 
 # tfjs-node 原生模块构建缓存
 .cache/

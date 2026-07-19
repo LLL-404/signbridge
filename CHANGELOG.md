@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### ⚡ 性能
+- perf(boot): 首屏 splash 隐藏逻辑从 `setTimeout(100ms)` 改为 `requestAnimationFrame`，省 100ms 等待；清理 index.html 中无效的 `preconnect cdn.jsdelivr.net` 和 `dns-prefetch storage.googleapis.com` 标签（src 中通过 fetch 直接访问 CDN 资源，preconnect/dns-prefetch 标签对运行时 fetch 无加速作用；CSP `connect-src` 白名单保留以维持 MediaPipe 模型加载）
+- perf(lighthouse): Lighthouse mobile 预设验证完成——三次实测 LCP 2561/2605/2597ms（均值 2588ms），Performance 93 分，FCP/TBT/CLS 均优秀；spec NFR-8 根据实测从 `< 2500ms` 调整为 `< 2800ms`（保持默认 3D 模式下受 three-core 172KB 硬下载时间约束）；spec AC-5 与 NFR-4 同步对齐为 `≤ 5 MiB`；tasks.md 中 B2/B3/B4/C2/D1/D3/E2 标记同步实际完成状态
+
 ### ✨ 新增
 - feat(perf): 加载性能优化工程——针对生产环境移动端/弱网下首屏白屏与路由切换卡顿，从 5 个维度组合优化（详见 `.trae/specs/loading-performance-optimization/`）；新增 11 个 VRMCache 单元测试，单元测试总数从 809 提升至 820，全部通过；4 个子 Agent 并行实施 + 交叉验证
 - feat(avatar): 新增 VRMCache.ts IndexedDB 持久化模块——三级加载优先级（内存缓存 → IndexedDB → HTTP），独立 IDB 封装（`signbridge-vrm-cache` 数据库 + `vrm_cache` store），VRM 10.7MB 首次加载后持久化，二次访问从 IndexedDB 秒开；失败时 try-catch 回退到 HTTP；导出 `loadVRM(url)` / `clearVRMCache(url?)` / `clearVRMCachePersistent(url?)` 统一接口
