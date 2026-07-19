@@ -8,6 +8,9 @@
 
 ## [Unreleased]
 
+### 📦 维护
+- chore(docs): 新增 6 册技术说明文档（docs/technical/）——01-architecture 系统架构总览、02-avatar-module 虚拟人驱动、03-recognition 手语识别管线、04-grammar-engine 语法引擎、05-data-layer 数据层、06-dev-guide 开发指南；面向大赛评委与开源社区开发者，含 Mermaid 图表与源码引用
+
 ### ⚡ 性能
 - perf(boot): 首屏 splash 隐藏逻辑从 `setTimeout(100ms)` 改为 `requestAnimationFrame`，省 100ms 等待；清理 index.html 中无效的 `preconnect cdn.jsdelivr.net` 和 `dns-prefetch storage.googleapis.com` 标签（src 中通过 fetch 直接访问 CDN 资源，preconnect/dns-prefetch 标签对运行时 fetch 无加速作用；CSP `connect-src` 白名单保留以维持 MediaPipe 模型加载）
 - perf(lighthouse): Lighthouse mobile 预设验证完成——三次实测 LCP 2561/2605/2597ms（均值 2588ms），Performance 93 分，FCP/TBT/CLS 均优秀；spec NFR-8 根据实测从 `< 2500ms` 调整为 `< 2800ms`（保持默认 3D 模式下受 three-core 172KB 硬下载时间约束）；spec AC-5 与 NFR-4 同步对齐为 `≤ 5 MiB`；tasks.md 中 B2/B3/B4/C2/D1/D3/E2 标记同步实际完成状态
