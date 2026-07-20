@@ -190,6 +190,11 @@ export default defineConfig({
           if (id.includes('node_modules/@tensorflow/tfjs-converter')) {
             return 'tfjs-converter'
           }
+          // meta-package 单独成 chunk，避免其 re-export 与子包运行时依赖形成循环
+          // 路径末尾的 / 是关键：只匹配 @tensorflow/tfjs 自身，不误伤 tfjs-core / tfjs-backend-webgl 等子包
+          if (id.includes('node_modules/@tensorflow/tfjs/')) {
+            return 'tfjs-meta'
+          }
           if (id.includes('node_modules/@tensorflow/')) {
             return 'tfjs-other'
           }
