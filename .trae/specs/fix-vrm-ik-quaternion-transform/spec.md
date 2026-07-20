@@ -1,3 +1,5 @@
+> **STATUS: DEPRECATED** — 被 rewrite-avatar-with-animation-mixer 取代
+
 # VRM IK 四元数变换修复 Spec
 
 ## Why

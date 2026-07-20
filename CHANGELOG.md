@@ -8,7 +8,22 @@
 
 ## [Unreleased]
 
+### 🔧 修复
+- fix(arch): 修复 `modules/data` ↔ `modules/recognition` 循环依赖——将 `Normalizer.ts` 从 `modules/recognition/` 下沉到独立的 `modules/normalize/` 目录（含单元测试同步迁移），打破 data → recognition 方向的依赖；recognition → data 方向的合理数据访问保留；`depcruise` 验证无循环依赖（161 modules, 509 dependencies, 0 violations）
+- fix(arch): VRMModel.tsx 通过 useVRMModel hook 间接访问 modules——新建 `hooks/useVRMModel.ts`（280 行）封装 VRM 加载、约束计算、实时驱动、PoseEstimator 访问的全部逻辑；VRMModel.tsx 从 284 行压缩到 43 行（-85%），6 处违规 import（5 处 `@/modules/avatar/*` + 1 处 `@/modules/recognition/*`）全部消除
+- fix(arch): 3 个页面通过 hooks 间接访问 modules——新增 `useGrammarEngine` / `useAvatarPipeline` / `useRecognizer` 三个 hooks；`useAvatarPipeline` 复用已存在的 `useAvatarPlayer`，消除 VoiceToSignPage 与 DialoguePage 约 50 行重复的 AvatarDriver 实例化代码；3 个页面共 13 处 `@/modules/*` 违规 import 全部清零（连 types import 也迁移到 hooks 重新导出）
+
+### ✨ 新增
+- feat(refactor): 抽取 `<PracticeFlow>` 通用容器——`components/learning/PracticeMode.tsx`（226→73 行）和 `AITutor.tsx`（320→123 行）共享约 60% 相同结构（CAPTURE_FRAME_COUNT=30、capturing/result 阶段机、framesRef/standardKeypointsRef）；新建 `PracticeFlow.tsx`（225 行）通过 props 注入出题策略和难度调整逻辑；两文件合计行数减少 64.1%（546→196），超过 60% 目标
+- feat(arch): 新增 4 个 hooks 间接层——`useVRMModel`（VRM 加载/约束/驱动）、`useGrammarEngine`（语法引擎）、`useAvatarPipeline`（流式队列 + VRM 加载回调，复用 useAvatarPlayer）、`useRecognizer`（双模式手势识别，单帧 + 序列）；components/ 与 pages/ 不再直接 import @/modules/* 内部实现
+
 ### 📦 维护
+- chore(spec): 归档 22 个 100% 完成的 spec 到 `.trae/specs/archive/`——使用 `git mv` 保留 rename 痕迹；2 个被废弃的 spec（`fix-vrm-arm-movement`、`fix-vrm-ik-quaternion-transform`）添加 `> **STATUS: DEPRECATED**` 标注；根目录从 31 个 spec 精简到 10 个活跃 spec + archive/，释放 71% 目录空间
+- chore(kernel): kernel/ 中 3 处 `console.*` 调用补充保留理由注释——`PluginManager.ts` 2 处 + `EventBus.ts` 1 处；kernel 保持独立不依赖 debug 模块（避免循环依赖），故保留 console 不替换为 logger
+- chore(test): 删除 `__diagnose_elbow.test.ts`——文件名 `__` 前缀导致 vitest 默认配置忽略，且文件本身无断言（仅 console.log 输出骨骼位置）、需要 30s 超时 + 真实 VRM 文件、硬编码特定 bug 调试数据，属于一次性调试产物不适合纳入 CI
+- chore(refactor): 抽取 `createPagePlugin()` 工厂——`plugins/index.ts` 4 个插件对象结构完全同构，通过工厂函数 + opts 参数注入差异点，文件从 159 行压缩到 78 行（-51%）
+- chore(docs): 修正 `vite.config.ts:25` 注释——从"首屏 gzip 从单体 622KB 降至 ~55KB"改为"~300KB（首次访问）；PWA 二次访问缓存命中后 ~55KB"，反映实际首次访问场景
+- chore(lint): 为 3 处 `eslint-disable-next-line react-hooks/exhaustive-deps` 补充中文理由注释——`SignToTextPage.tsx:156`、`PracticeMode.tsx:67`、`AITutor.tsx:82`
 - chore(docs): 新增 6 册技术说明文档（docs/technical/）——01-architecture 系统架构总览、02-avatar-module 虚拟人驱动、03-recognition 手语识别管线、04-grammar-engine 语法引擎、05-data-layer 数据层、06-dev-guide 开发指南；面向大赛评委与开源社区开发者，含 Mermaid 图表与源码引用
 
 ### ⚡ 性能

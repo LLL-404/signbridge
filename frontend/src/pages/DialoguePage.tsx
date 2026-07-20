@@ -1,23 +1,17 @@
 // 双向对话页面：左侧健听人（语音→手语），右侧听障人（手语→文字）
+// 通过 hooks 间接访问 modules：
+//   - useGrammarEngine：语法引擎（中文→手语词汇序列）
+//   - useAvatarPipeline：AvatarDriver + 流式播放队列
+//   - useRecognizer({ sequence: true })：KeypointExtractor + SequenceClassifier + ConfidenceFilter
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { VRM } from '@pixiv/three-vrm';
 import { VoiceInput } from '@/components/voice/VoiceInput';
 import { SignCamera } from '@/components/sign/SignCamera';
 import AvatarCanvas from '@/components/avatar/AvatarCanvas';
-import { grammarEngine } from '@/modules/grammar/GrammarEngine';
-import { AvatarDriver } from '@/modules/avatar/AvatarDriver';
-import type { VRMAnimator } from '@/modules/avatar/VRMAnimator';
-import { KeypointExtractor } from '@/modules/recognition/KeypointExtractor';
-import { SequenceClassifier } from '@/modules/recognition/SequenceClassifier';
-import { ConfidenceFilter } from '@/modules/recognition/ConfidenceFilter';
-import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
-import type { BonePose, VRMPose } from '@/types/avatar';
+import { useGrammarEngine } from '@/hooks/useGrammarEngine';
+import { useAvatarPipeline } from '@/hooks/useAvatarPipeline';
+import { useRecognizer } from '@/hooks/useRecognizer';
 import type { FrameKeypoints, KeypointSequence, RecognitionStatus } from '@/types/recognition';
 import { PageHeader } from '@/components/common/PageHeader';
-import { logger } from '@/modules/debug/logger';
-import { startupTracker } from '@/modules/debug/StartupTracker';
-
-const log = logger.module('DialoguePage');
 
 /** 消息来源 */
 type Sender = 'hearing' | 'deaf';
@@ -61,36 +55,16 @@ export function DialoguePage() {
     );
   }, []);
 
-  // ===== 虚拟人（语音→手语）=====
-  const [currentPose, setCurrentPose] = useState<BonePose>(NEUTRAL_POSE);
-  const [currentVRMPose, setCurrentVRMPose] = useState<VRMPose>(NEUTRAL_VRM_POSE);
-  const avatarDriverRef = useRef<AvatarDriver | null>(null);
-  if (avatarDriverRef.current === null) {
-    avatarDriverRef.current = new AvatarDriver();
-  }
-  const queueRef = useRef<Parameters<AvatarDriver['playSequence']>[0][]>([]);
-  const isPlayingRef = useRef(false);
-  const rafRef = useRef<number>(0);
-  const lastTimeRef = useRef(0);
-  const lastPoseRef = useRef<BonePose>(NEUTRAL_POSE);
-  const playNextRef = useRef<(seq: Parameters<AvatarDriver['playSequence']>[0]) => void>(() => {});
+  // ===== 虚拟人（语音→手语）：通过 hooks 间接访问 modules/avatar =====
+  const { convert } = useGrammarEngine();
+  const {
+    pose: currentPose,
+    vrmPose: currentVRMPose,
+    playOrEnqueue,
+    handleVRMLoaded,
+  } = useAvatarPipeline();
 
-  // 播放下一个序列
-  playNextRef.current = (sequence) => {
-    const driver = avatarDriverRef.current;
-    if (!driver) return;
-    isPlayingRef.current = true;
-    void driver.playSequence(sequence, () => {
-      const next = queueRef.current.shift();
-      if (next) {
-        playNextRef.current(next);
-      } else {
-        isPlayingRef.current = false;
-      }
-    });
-  };
-
-  // 处理语音识别文本
+  /** 处理语音识别文本：转手语词汇序列并入队播放 */
   const handleVoiceText = useCallback(
     (text: string, isFinal: boolean) => {
       if (!isFinal || !text.trim()) return;
@@ -99,7 +73,7 @@ export function DialoguePage() {
       // 送入语法引擎
       void (async () => {
         try {
-          const sequence = await grammarEngine.convert(text);
+          const sequence = await convert(text);
           // 有未匹配词时追加一条系统提示消息
           if (sequence.unmatched_words && sequence.unmatched_words.length > 0) {
             appendMessage({
@@ -109,116 +83,47 @@ export function DialoguePage() {
             });
           }
           if (sequence.items.length === 0) return;
-          if (isPlayingRef.current) {
-            queueRef.current.push(sequence);
-          } else {
-            playNextRef.current(sequence);
-          }
-        } catch (err) {
-          log.error('语法转换失败', err);
+          // 流式入队：正在播放则排队，否则立即播放
+          playOrEnqueue(sequence);
+        } catch {
+          // 语法转换错误已在 hook 内部记录，页面静默处理避免打断对话
         }
       })();
     },
-    [appendMessage],
+    [appendMessage, convert, playOrEnqueue],
   );
 
-  // ===== VRM 加载完成回调：把 VRM 和 VRMAnimator 注入 AvatarDriver =====
-  const handleVRMLoaded = useCallback((vrm: VRM, animator: VRMAnimator) => {
-    avatarDriverRef.current?.setVRMAnimator(vrm, animator);
-    log.info('VRM 已加载并绑定到 AvatarDriver');
-  }, []);
-
-  // 动画循环
-  useEffect(() => {
-    const tick = (timestamp: number) => {
-      const driver = avatarDriverRef.current;
-      if (driver) {
-        const delta = lastTimeRef.current === 0 ? 0 : timestamp - lastTimeRef.current;
-        lastTimeRef.current = timestamp;
-        driver.update(delta);
-        const pose = driver.getCurrentPose();
-        if (pose !== lastPoseRef.current) {
-          lastPoseRef.current = pose;
-          setCurrentPose(pose);
-        }
-        // VRM 新骨骼轨道：每帧同步
-        setCurrentVRMPose(driver.getCurrentVRMPose());
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      avatarDriverRef.current?.stop();
-      queueRef.current = [];
-      isPlayingRef.current = false;
-    };
-  }, []);
-
-  // ===== 手语识别（听障人侧）=====
+  // ===== 手语识别（听障人侧）：通过 useRecognizer 间接访问 modules/recognition =====
   const [signStatus, setSignStatus] = useState<RecognitionStatus>('idle');
-  const [modelLoading, setModelLoading] = useState(true);
-  const extractorRef = useRef<KeypointExtractor | null>(null);
-  const classifierRef = useRef<SequenceClassifier | null>(null);
-  const filterRef = useRef<ConfidenceFilter | null>(null);
   const statusRef = useRef<RecognitionStatus>('idle');
   const lastFrameTimeRef = useRef(0);
+
+  // 序列识别模式：KeypointExtractor + SequenceClassifier + ConfidenceFilter
+  const { sequence } = useRecognizer({ singleFrame: false, sequence: true });
+  const modelLoading = sequence?.modelLoading ?? false;
 
   useEffect(() => {
     statusRef.current = signStatus;
   }, [signStatus]);
-
-  // 初始化识别模型
-  useEffect(() => {
-    extractorRef.current = new KeypointExtractor();
-    classifierRef.current = new SequenceClassifier();
-    filterRef.current = new ConfidenceFilter();
-    let cancelled = false;
-    // 启动对话模型加载计时
-    startupTracker.start('dialogue-model-load', '加载对话模型');
-    classifierRef.current
-      .init()
-      .then(() => {
-        if (!cancelled) {
-          // 模型加载完成
-          startupTracker.end('dialogue-model-load');
-          setModelLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          // 模型加载失败
-          startupTracker.fail('dialogue-model-load', err);
-          log.error('模型加载失败', err);
-          setModelLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-      classifierRef.current?.dispose();
-    };
-  }, []);
 
   const updateStatus = useCallback((s: RecognitionStatus) => {
     statusRef.current = s;
     setSignStatus(s);
   }, []);
 
+  /** 分类关键点序列并追加识别消息 */
   const handleClassify = useCallback(
-    async (sequence: KeypointSequence | null) => {
-      const classifier = classifierRef.current;
-      const filter = filterRef.current;
-      if (!classifier || !filter) return;
-      if (!sequence) {
+    async (seq: KeypointSequence | null) => {
+      if (!sequence) return;
+      if (!seq) {
         updateStatus('waiting');
         return;
       }
       try {
-        const result = await classifier.classify(sequence);
-        const filtered = filter.filter(result);
+        const result = await sequence.classify(seq);
+        const filtered = sequence.filter(result);
         if (filtered.accepted) {
           updateStatus('result');
-          // 追加手语识别消息
           appendMessage({
             sender: 'deaf',
             type: 'sign',
@@ -228,41 +133,44 @@ export function DialoguePage() {
         } else {
           updateStatus('uncertain');
         }
-      } catch (err) {
-        log.error('识别失败', err);
+      } catch {
+        // 错误已在 hook 内部记录
         updateStatus('uncertain');
       }
     },
-    [appendMessage, updateStatus],
+    [appendMessage, sequence, updateStatus],
   );
 
+  /** 处理关键点：喂入提取器，检测运动起止，触发分类 */
   const handleKeypoints = useCallback(
     (frame: FrameKeypoints) => {
-      const extractor = extractorRef.current;
-      if (!extractor) return;
+      if (!sequence) return;
       if (statusRef.current === 'recognizing') return;
 
+      // 摄像头重启检测：帧间隔过大时重置提取器
       const now = Date.now();
       if (lastFrameTimeRef.current > 0 && now - lastFrameTimeRef.current > FRAME_GAP_THRESHOLD) {
-        extractor.reset();
+        sequence.reset();
       }
       lastFrameTimeRef.current = now;
 
       if (statusRef.current === 'idle') updateStatus('waiting');
-      extractor.feed(frame);
+      sequence.feed(frame);
 
-      if (extractor.isMotionEnded()) {
+      // 运动结束：提取序列并触发分类
+      if (sequence.isMotionEnded()) {
         updateStatus('recognizing');
-        const seq = extractor.extract();
-        extractor.reset();
+        const seq = sequence.extract();
+        sequence.reset();
         void handleClassify(seq);
         return;
       }
-      if (extractor.isMotionStarted()) {
-        if (statusRef.current !== 'capturing') updateStatus('capturing');
+      // 运动开始：切换到 capturing 状态
+      if (sequence.isMotionStarted() && statusRef.current !== 'capturing') {
+        updateStatus('capturing');
       }
     },
-    [handleClassify, updateStatus],
+    [handleClassify, sequence, updateStatus],
   );
 
   return (

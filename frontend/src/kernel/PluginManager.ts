@@ -20,7 +20,7 @@ import { eventBus } from './EventBus';
 /** 内核版本 */
 const KERNEL_VERSION = '1.0.0';
 
-// kernel保持独立，不依赖debug模块
+// 保留 console：kernel 保持独立，不依赖 debug 模块，避免循环依赖
 const log = {
   warn: (msg: string, ...args: unknown[]) => console.warn(`[PluginManager] ${msg}`, ...args),
   error: (msg: string, ...args: unknown[]) => console.error(`[PluginManager] ${msg}`, ...args),

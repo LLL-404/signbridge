@@ -5,7 +5,7 @@
 
 import type { EventHandler } from './types';
 
-// kernel保持独立，不依赖debug模块
+// 保留 console：kernel 保持独立，不依赖 debug 模块，避免循环依赖
 const log = {
   error: (msg: string, ...args: unknown[]) => console.error(`[EventBus] ${msg}`, ...args),
 };

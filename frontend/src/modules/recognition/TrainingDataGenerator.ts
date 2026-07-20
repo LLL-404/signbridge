@@ -3,7 +3,7 @@
 
 import type { SignGloss } from '@/types/sign';
 import type { HandKeypoint, FrameKeypoints, KeypointSequence } from '@/types/recognition';
-import { Normalizer } from './Normalizer';
+import { Normalizer } from '@/modules/normalize/Normalizer';
 import { DataAugmentor } from './DataAugmentor';
 import { vocabularyStore } from '@/modules/data/VocabularyStore';
 import { initializeVocabulary } from '@/modules/data/DataInitializer';

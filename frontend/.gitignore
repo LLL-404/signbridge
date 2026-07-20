@@ -23,6 +23,9 @@ lighthouse-mobile-*.json
 # tfjs-node 原生模块构建缓存
 .cache/
 
+# 测试覆盖率产物
+coverage/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

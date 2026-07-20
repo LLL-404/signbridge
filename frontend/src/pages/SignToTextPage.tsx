@@ -1,34 +1,24 @@
 /**
  * 手语转文字页面
  *
- * 集成三层识别架构：
- *   1. WorkerRecognizer - Worker 化 MediaPipe 推理（主路径，后台线程）
- *   2. RuleRecognizer   - 几何规则识别（降级 fallback，主线程）
- *   3. ContinuousRecognizer - 连续手势状态机（滑动窗口 + 组合词典）
+ * 通过 useRecognizer Hook 间接访问 modules/recognition：
+ *   - WorkerRecognizer / RuleRecognizer / ContinuousRecognizer 均由 hook 管理生命周期
+ *   - 页面只负责摄像头管理、rAF 帧循环、UI 状态展示
  *
  * 数据流：
- *   getUserMedia → video → requestAnimationFrame → recognizer.recognize
- *     → ContinuousRecognizer.process → 单帧手势 + 组合文本 → UI
+ *   getUserMedia → video → requestAnimationFrame → recognize
+ *     → processContinuous → 单帧手势 + 组合文本 → UI
  *
  * 降级策略：
- *   Worker 初始化失败 / 崩溃超限 → 自动切换 RuleRecognizer，UI 显示降级提示
+ *   Worker 初始化失败 / 崩溃超限 → hook 内部自动切换 RuleRecognizer，
+ *   通过 isDegraded() 暴露降级状态，UI 显示降级提示
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { WorkerRecognizer } from '@/modules/recognition/WorkerRecognizer';
-import { RuleRecognizer, type GestureDefinition } from '@/modules/recognition/RuleRecognizer';
-import {
-  ContinuousRecognizer,
-  type GestureEvent,
-  type ContinuousResult,
-} from '@/modules/recognition/ContinuousRecognizer';
-import type { Recognizer } from '@/modules/recognition/Recognizer';
+import { useRecognizer } from '@/hooks/useRecognizer';
+import type { GestureEvent } from '@/hooks/useRecognizer';
 import type { ClassificationResult, RecognitionStatus } from '@/types/recognition';
 import { PageHeader } from '@/components/common/PageHeader';
-import { logger } from '@/modules/debug/logger';
-import { startupTracker } from '@/modules/debug/StartupTracker';
-
-const log = logger.module('SignToTextPage');
 
 /** 历史记录最大条数 */
 const MAX_HISTORY = 10;
@@ -56,33 +46,36 @@ interface HistoryItem {
 }
 
 /**
- * 手语识别页面（插件化架构 + JSON 手势库版）
- * 基于 MediaPipe Hands 关键点 + JSON 规则匹配，支持手势热加载和自定义
- * 流程：摄像头 → MediaPipe Hands → 关键点几何特征 → JSON 规则匹配 → 文字输出
+ * 手语识别页面
+ * 摄像头捕捉手势，实时识别为中文
  */
 export function SignToTextPage() {
-  // 模型加载状态
-  const [modelLoading, setModelLoading] = useState(true);
-  const [modelError, setModelError] = useState<string | null>(null);
-  // 当前启动阶段标签（用于 loading 界面展示）
-  const [currentPhaseLabel, setCurrentPhaseLabel] = useState<string | undefined>(undefined);
+  // 通过 hook 获取识别器与状态（封装了 Worker/Rule/ContinuousRecognizer 与 startupTracker）
+  const {
+    recognize,
+    processContinuous,
+    clearContinuous,
+    isReady,
+    isDegraded,
+    supportedGestures,
+    modelLoading,
+    modelError,
+    currentPhaseLabel,
+  } = useRecognizer();
 
   // 识别状态与结果
   const [status, setStatus] = useState<RecognitionStatus>('idle');
   const [result, setResult] = useState<ClassificationResult | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isTracking, setIsTracking] = useState(false);
-  const [supportedGestures, setSupportedGestures] = useState<GestureDefinition[]>([]);
   // 连续手语识别状态
   const [gestureSequence, setGestureSequence] = useState<GestureEvent[]>([]);
   const [combinedText, setCombinedText] = useState('');
   const [degradedMode, setDegradedMode] = useState(false);
+  // 摄像头错误（独立于 hook 的 modelError，模型错误由 hook 管理）
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
-  // 可变实例引用
-  const recognizerRef = useRef<Recognizer | null>(null);
-  const workerRecognizerRef = useRef<WorkerRecognizer | null>(null);
-  const ruleRecognizerRef = useRef<RuleRecognizer | null>(null);
-  const continuousRecognizerRef = useRef<ContinuousRecognizer | null>(null);
+  // 摄像头与画布引用
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -90,73 +83,7 @@ export function SignToTextPage() {
   const runningRef = useRef(false);
   const historyIdRef = useRef(0);
 
-  // 订阅启动阶段变化，用于 loading 界面显示当前阶段
-  useEffect(() => {
-    return startupTracker.onPhaseChange(() => {
-      setCurrentPhaseLabel(startupTracker.getCurrentPhase()?.label);
-    });
-  }, []);
-
-  // 初始化识别器（优先用 Worker，失败降级到主线程）
-  useEffect(() => {
-    // 初始化连续识别器
-    continuousRecognizerRef.current = new ContinuousRecognizer();
-    let cancelled = false;
-
-    const initWorker = async () => {
-      // 启动 Worker 识别器初始化计时
-      startupTracker.start('signpage-worker-init', '初始化识别器');
-      try {
-        const workerRecognizer = new WorkerRecognizer();
-        await workerRecognizer.init();
-        if (cancelled) {
-          workerRecognizer.dispose();
-          return;
-        }
-        workerRecognizerRef.current = workerRecognizer;
-        recognizerRef.current = workerRecognizer;
-        // Worker 识别器初始化成功
-        startupTracker.end('signpage-worker-init');
-        setModelLoading(false);
-        setSupportedGestures(workerRecognizer.getGestures());
-      } catch (err) {
-        log.warn('Worker 不可用，降级到主线程', err);
-        // Worker 初始化失败，标记失败并启动降级流程计时
-        startupTracker.fail('signpage-worker-init', err);
-        startupTracker.start('signpage-fallback-init', '降级到规则识别');
-        // 降级到 RuleRecognizer
-        const ruleRecognizer = new RuleRecognizer();
-        await ruleRecognizer.init();
-        if (cancelled) {
-          ruleRecognizer.dispose();
-          return;
-        }
-        ruleRecognizerRef.current = ruleRecognizer;
-        recognizerRef.current = ruleRecognizer;
-        // 降级识别器初始化成功
-        startupTracker.end('signpage-fallback-init');
-        setModelLoading(false);
-        setSupportedGestures(ruleRecognizer.getGestures());
-      }
-    };
-
-    initWorker().catch((err) => {
-      if (!cancelled) {
-        setModelError(err instanceof Error ? err.message : '模型加载失败');
-        setModelLoading(false);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      stopTracking();
-      workerRecognizerRef.current?.dispose();
-      ruleRecognizerRef.current?.dispose();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /** 在 canvas 上绘制视频帧与手部关键点 */
+  /** 在 canvas 上绘制视频帧（镜像翻转以匹配用户视角） */
   const drawFrame = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -169,83 +96,73 @@ export function SignToTextPage() {
     const height = canvas.height;
 
     ctx.save();
-    // 镜像绘制
     ctx.translate(width, 0);
     ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, width, height);
     ctx.restore();
   }, []);
 
-  /** 帧处理循环：使用 requestAnimationFrame 持续识别手势 */
+  /** 帧处理循环：识别 → 连续识别 → 状态更新 → 下一帧 */
   const processFrame = useCallback(async () => {
     if (!runningRef.current) return;
 
     const video = videoRef.current;
-    const recognizer = recognizerRef.current;
-    if (!video || !recognizer || !recognizer.isReady()) {
+    if (!video || !isReady()) {
       rafIdRef.current = requestAnimationFrame(processFrame);
       return;
     }
 
     try {
-      const recognition = await recognizer.recognize({ element: video });
+      const recognition = await recognize({ element: video });
       drawFrame();
 
       if (!runningRef.current) return;
 
-      // 用连续识别器处理结果（内置稳定检测 + 序列组合）
-      const continuous = continuousRecognizerRef.current;
-      if (continuous) {
-        const continuousResult: ContinuousResult = continuous.process(recognition);
+      // 连续手势识别（内置稳定检测 + 序列组合）
+      const continuousResult = processContinuous(recognition);
+      setGestureSequence(continuousResult.sequence);
+      setCombinedText(continuousResult.combinedText);
 
-        // 更新连续序列状态
-        setGestureSequence(continuousResult.sequence);
-        setCombinedText(continuousResult.combinedText);
-
-        if (continuousResult.newGesture) {
-          // 检测到新的稳定手势加入序列
-          const lastGesture = continuousResult.sequence[continuousResult.sequence.length - 1];
-          if (lastGesture) {
-            setResult({
-              gloss_id: lastGesture.gloss_id,
-              chinese: lastGesture.chinese,
-              confidence: lastGesture.confidence,
-            });
-            setStatus('result');
-            const itemId = historyIdRef.current++;
-            setHistory((prev) =>
-              [
-                {
-                  id: itemId,
-                  chinese: lastGesture.chinese,
-                  confidence: lastGesture.confidence,
-                  gloss_id: lastGesture.gloss_id,
-                  timestamp: Date.now(),
-                },
-                ...prev,
-              ].slice(0, MAX_HISTORY),
-            );
-          }
-        } else if (recognition && recognition.gloss_id !== 'none') {
-          setStatus('capturing');
-        } else {
-          setStatus('waiting');
+      if (continuousResult.newGesture) {
+        // 检测到新的稳定手势加入序列
+        const lastGesture = continuousResult.sequence[continuousResult.sequence.length - 1];
+        if (lastGesture) {
+          setResult({
+            gloss_id: lastGesture.gloss_id,
+            chinese: lastGesture.chinese,
+            confidence: lastGesture.confidence,
+          });
+          setStatus('result');
+          const itemId = historyIdRef.current++;
+          setHistory((prev) =>
+            [
+              {
+                id: itemId,
+                chinese: lastGesture.chinese,
+                confidence: lastGesture.confidence,
+                gloss_id: lastGesture.gloss_id,
+                timestamp: Date.now(),
+              },
+              ...prev,
+            ].slice(0, MAX_HISTORY),
+          );
         }
+      } else if (recognition && recognition.gloss_id !== 'none') {
+        setStatus('capturing');
+      } else {
+        setStatus('waiting');
       }
 
-      // 更新降级模式状态
-      const workerRec = workerRecognizerRef.current;
-      if (workerRec) {
-        setDegradedMode(workerRec.isDegraded());
-      }
-    } catch (err) {
-      log.error('识别失败', err);
+      // 更新降级模式状态（Worker 崩溃后 hook 内部自动降级）
+      setDegradedMode(isDegraded());
+    } catch {
+      // 识别错误已在 hook 内部记录；此处静默以保持帧循环
     }
 
     if (runningRef.current) {
       rafIdRef.current = requestAnimationFrame(processFrame);
     }
-  }, [drawFrame]);
+  }, [drawFrame, isReady, recognize, processContinuous, isDegraded]);
 
   /** 启动摄像头与识别循环 */
   const startTracking = useCallback(async () => {
@@ -276,14 +193,14 @@ export function SignToTextPage() {
       rafIdRef.current = requestAnimationFrame(processFrame);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'NotAllowedError') {
-        setModelError('请允许摄像头权限');
+        setCameraError('请允许摄像头权限');
       } else {
-        setModelError(err instanceof Error ? err.message : '摄像头启动失败');
+        setCameraError(err instanceof Error ? err.message : '摄像头启动失败');
       }
     }
   }, [processFrame]);
 
-  /** 停止追踪 */
+  /** 停止追踪：释放摄像头流、取消动画帧 */
   const stopTracking = useCallback(() => {
     runningRef.current = false;
     if (rafIdRef.current !== null) {
@@ -300,6 +217,13 @@ export function SignToTextPage() {
     setStatus('idle');
   }, []);
 
+  // 组件卸载时停止追踪（识别器 dispose 由 hook 内部处理）
+  useEffect(() => {
+    return () => {
+      stopTracking();
+    };
+  }, [stopTracking]);
+
   // 模型加载中
   if (modelLoading) {
     return (
@@ -313,17 +237,23 @@ export function SignToTextPage() {
     );
   }
 
-  // 模型加载失败
-  if (modelError) {
+  // 错误展示：摄像头错误优先于模型错误（用户操作触发的错误更需关注）
+  const displayError = cameraError ?? modelError;
+  if (displayError) {
+    const isCameraError = cameraError !== null;
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10">
           <span className="text-2xl text-red-400">!</span>
         </div>
-        <p className="mb-2 text-lg font-semibold text-red-400">模型加载失败</p>
-        <p className="text-content-secondary">{modelError}</p>
+        <p className="mb-2 text-lg font-semibold text-red-400">
+          {isCameraError ? '摄像头启动失败' : '模型加载失败'}
+        </p>
+        <p className="text-content-secondary">{displayError}</p>
         <p className="mt-4 text-sm text-content-muted">
-          请检查网络连接（需从 CDN 加载 MediaPipe 模型）
+          {isCameraError
+            ? '请检查摄像头权限与设备连接'
+            : '请检查网络连接（需从 CDN 加载 MediaPipe 模型）'}
         </p>
       </div>
     );
@@ -425,7 +355,7 @@ export function SignToTextPage() {
             )}
           </div>
 
-          {/* 连续手势序列（新增） */}
+          {/* 连续手势序列 */}
           {gestureSequence.length > 0 && (
             <div className="card animate-fade-up border border-dark-600 p-4" style={{ animationDelay: '280ms' }}>
               <div className="mb-2 flex items-center justify-between">
@@ -435,7 +365,7 @@ export function SignToTextPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    continuousRecognizerRef.current?.clear();
+                    clearContinuous();
                     setGestureSequence([]);
                     setCombinedText('');
                   }}
@@ -463,7 +393,7 @@ export function SignToTextPage() {
             </div>
           )}
 
-          {/* 降级模式提示（新增）：role="alert" 让屏幕阅读器立即朗读 */}
+          {/* 降级模式提示：role="alert" 让屏幕阅读器立即朗读 */}
           {degradedMode && (
             <div className="animate-fade-up rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-400" role="alert">
               <span aria-hidden="true">⚠️ </span>Worker 不可用，已降级到主线程识别（性能略降，功能正常）

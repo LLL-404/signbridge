@@ -19,7 +19,9 @@ import type { SignGloss } from '@/types/sign';
 
 // ===== Mock Normalizer =====
 const normalizeSpy = vi.hoisted(() => vi.fn());
-vi.mock('./Normalizer', () => ({
+// mock 路径需与 TrainingDataGenerator.ts 的实际 import 路径保持一致
+// Normalizer 已从 modules/recognition/ 下沉到 modules/normalize/
+vi.mock('@/modules/normalize/Normalizer', () => ({
   Normalizer: vi.fn().mockImplementation(() => ({
     normalize: normalizeSpy,
   })),

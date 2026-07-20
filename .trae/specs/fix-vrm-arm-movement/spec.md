@@ -1,3 +1,5 @@
+> **STATUS: DEPRECATED** — 被 rewrite-avatar-with-animation-mixer 取代
+
 # VRM 手臂动作不可见修复 Spec
 
 ## Why

@@ -2,7 +2,7 @@
 // 初始化时自动加载已训练模型，若不存在则触发训练
 
 import type { ClassificationResult, KeypointSequence } from '@/types/recognition';
-import { Normalizer } from './Normalizer';
+import { Normalizer } from '@/modules/normalize/Normalizer';
 import { SignModel, MODEL_STORAGE_PATH } from './SignModel';
 import { ModelTrainer, LABEL_MAP_KEY, type LabelMapRecord } from './ModelTrainer';
 import { idbAdapter, STORES } from '@/modules/data/IndexedDBAdapter';

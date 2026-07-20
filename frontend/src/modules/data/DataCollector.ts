@@ -2,7 +2,7 @@
 // 支持录制、标注、质量校验、本地存储、导出训练数据集
 
 import type { FrameKeypoints, KeypointSequence } from '@/types/recognition';
-import { Normalizer } from '@/modules/recognition/Normalizer';
+import { Normalizer } from '@/modules/normalize/Normalizer';
 import { idbAdapter } from './IndexedDBAdapter';
 
 /** 单个标注样本 */

@@ -13,26 +13,19 @@
  *   - 模式切换：3D（Three.js 骨骼动画）/ 2D（Canvas 序列帧）
  *   - 中间结果实时显示，最终结果累积保存
  *
- * 依赖模块：VoiceInput / GrammarEngine / AvatarDriver / AvatarCanvas / avatarStore
+ * 依赖：useGrammarEngine / useAvatarPipeline / AvatarCanvas / avatarStore
+ *       底层 modules（GrammarEngine、AvatarDriver）通过 hooks 间接访问
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
-import type { VRM } from '@pixiv/three-vrm';
 import { VoiceInput } from '@/components/voice/VoiceInput';
 import AvatarCanvas from '@/components/avatar/AvatarCanvas';
-import { grammarEngine } from '@/modules/grammar/GrammarEngine';
-import { AvatarDriver } from '@/modules/avatar/AvatarDriver';
-import type { VRMAnimator } from '@/modules/avatar/VRMAnimator';
+import { useGrammarEngine } from '@/hooks/useGrammarEngine';
+import { useAvatarPipeline } from '@/hooks/useAvatarPipeline';
 import { useAvatarStore } from '@/stores/avatarStore';
-import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
-import type { BonePose, VRMPose } from '@/types/avatar';
-import type { GlossSequence, GlossSequenceItem } from '@/types/grammar';
+import type { GlossSequenceItem } from '@/types/grammar';
 import { PageHeader } from '@/components/common/PageHeader';
-import { logger } from '@/modules/debug/logger';
-import { startupTracker } from '@/modules/debug/StartupTracker';
-
-const log = logger.module('VoiceToSignPage');
 
 /** 语速范围与步进 */
 const MIN_SPEED = 0.5;
@@ -60,10 +53,6 @@ export function VoiceToSignPage() {
   const [textInput, setTextInput] = useState('');
   /** 管道状态：idle 空闲 / loading 加载数据 / converting 转换中 / playing 播放中 / error 错误 */
   const [pipelineStatus, setPipelineStatus] = useState<'idle' | 'loading' | 'converting' | 'playing' | 'error'>('idle');
-  /** 当前虚拟人姿态（传给 Avatar3D，旧 BonePose 轨道） */
-  const [currentPose, setCurrentPose] = useState<BonePose>(NEUTRAL_POSE);
-  /** 当前 VRM 姿态（新骨骼轨道，传给 VRM 模型） */
-  const [currentVRMPose, setCurrentVRMPose] = useState<VRMPose>(NEUTRAL_VRM_POSE);
 
   // ===== 全局状态（avatarStore） =====
   const mode = useAvatarStore((s) => s.mode);
@@ -73,43 +62,22 @@ export function VoiceToSignPage() {
   const setPlaybackSpeed = useAvatarStore((s) => s.setPlaybackSpeed);
   const setIsPlaying = useAvatarStore((s) => s.setIsPlaying);
 
-  // ===== 实例与可变状态引用（不触发重渲染） =====
-  const avatarDriverRef = useRef<AvatarDriver | null>(null);
-  if (avatarDriverRef.current === null) {
-    avatarDriverRef.current = new AvatarDriver();
-  }
-  /** 播放队列：等待播放的句子序列 */
-  const queueRef = useRef<GlossSequence[]>([]);
-  /** 播放状态引用（避免闭包陈旧） */
-  const isPlayingRef = useRef(false);
-  /** rAF 句柄 */
-  const rafRef = useRef<number>(0);
-  /** 上一帧时间戳（毫秒） */
-  const lastTimeRef = useRef(0);
-  /** 上一次的 pose 引用，仅在变化时 setState 以减少无谓重渲染 */
-  const lastPoseRef = useRef<BonePose>(NEUTRAL_POSE);
-  /** 播放下一个序列的函数引用（打破循环依赖） */
-  const playNextRef = useRef<(seq: GlossSequence) => void>(() => {});
+  // ===== Hooks：语法引擎 + 虚拟人播放管线（封装 modules 访问） =====
+  const { convert } = useGrammarEngine();
+  const {
+    pose: currentPose,
+    vrmPose: currentVRMPose,
+    playOrEnqueue,
+    handleVRMLoaded,
+    setSpeed,
+    stop: stopPipeline,
+    isPlaying: pipelinePlaying,
+  } = useAvatarPipeline();
 
-  // ===== 播放下一个序列（队列驱动：播完当前自动播下一个） =====
-  playNextRef.current = (sequence: GlossSequence) => {
-    const driver = avatarDriverRef.current;
-    if (!driver) return;
-    isPlayingRef.current = true;
-    setIsPlaying(true);
-    void driver.playSequence(sequence, () => {
-      // 当前序列播放完成，检查队列是否有待播句子
-      const next = queueRef.current.shift();
-      if (next) {
-        playNextRef.current(next);
-      } else {
-        isPlayingRef.current = false;
-        setIsPlaying(false);
-        // 队列空：管道回到空闲
-        setPipelineStatus('idle');
-      }
-    });
-  };
+  // 同步 pipeline 播放状态到 avatarStore（供全局 UI 使用）
+  useEffect(() => {
+    setIsPlaying(pipelinePlaying);
+  }, [pipelinePlaying, setIsPlaying]);
 
   // ===== 语法引擎转换 + 入队播放 =====
   const processSentence = useCallback(async (text: string) => {
@@ -119,7 +87,7 @@ export function VoiceToSignPage() {
     setPipelineStatus('converting');
     try {
       // 中文文字 → 手语词汇序列
-      const sequence = await grammarEngine.convert(text);
+      const sequence = await convert(text);
       setGlossItems(sequence.items);
       setUnmatchedWords(sequence.unmatched_words ?? []);
       if (sequence.items.length === 0) {
@@ -128,20 +96,18 @@ export function VoiceToSignPage() {
         setPipelineStatus('error');
         return;
       }
-      // 流式处理：正在播放则入队，否则立即播放
-      if (isPlayingRef.current) {
-        queueRef.current.push(sequence);
-      } else {
-        playNextRef.current(sequence);
-        // 进入播放阶段（播放完成回调中重置为 idle）
-        setPipelineStatus('playing');
-      }
+      // 流式处理：playOrEnqueue 内部判断入队或立即播放
+      // 队列空时（最后一个序列播完）触发 onQueueEmpty 回调，回到 idle
+      playOrEnqueue(sequence, () => {
+        setPipelineStatus('idle');
+      });
+      // 进入播放阶段（无论立即播放还是入队，UI 都显示"播放中"）
+      setPipelineStatus('playing');
     } catch (err) {
-      log.error('语法转换失败', err);
       setConvertError(err instanceof Error ? err.message : '转换失败');
       setPipelineStatus('error');
     }
-  }, []);
+  }, [convert, playOrEnqueue]);
 
   // ===== 处理语音识别文本 =====
   const handleText = useCallback(
@@ -164,7 +130,6 @@ export function VoiceToSignPage() {
     const text = textInput.trim();
     // 空文本不触发
     if (!text) return;
-    log.info('文本输入提交', text);
     void processSentence(text);
     // 提交后清空输入框
     setTextInput('');
@@ -181,74 +146,30 @@ export function VoiceToSignPage() {
     [handleTextInput],
   );
 
-  // ===== VRM 加载完成回调：把 VRM 和 VRMAnimator 注入 AvatarDriver =====
-  // AvatarDriver 通过 VRMAnimator.playClip 触发动画，VRMModel 的 useFrame 调用 vrmAnimator.update(delta) 推进
-  const handleVRMLoaded = useCallback((vrm: VRM, animator: VRMAnimator) => {
-    avatarDriverRef.current?.setVRMAnimator(vrm, animator);
-    log.info('VRM 已加载并绑定到 AvatarDriver');
-  }, []);
-
-  // ===== 动画循环：requestAnimationFrame 驱动 AvatarDriver =====
-  useEffect(() => {
-    // 启动页面初始化与 VRM 模型加载计时
-    // 注：VRM 模型实际在子组件 AvatarCanvas/VRMModel 中异步加载，
-    // 此处计量的是页面侧驱动管线的就绪时间
-    startupTracker.start('voicesign-init', '初始化语音转手语');
-    startupTracker.start('voicesign-vrm-load', '加载 VRM 模型');
-
-    const tick = (timestamp: number) => {
-      const driver = avatarDriverRef.current;
-      if (driver) {
-        // 计算帧间隔（毫秒），首帧 delta 为 0 避免大跳跃
-        const delta = lastTimeRef.current === 0 ? 0 : timestamp - lastTimeRef.current;
-        lastTimeRef.current = timestamp;
-        driver.update(delta);
-        // 仅在 pose 引用变化时更新状态，减少无谓重渲染
-        const pose = driver.getCurrentPose();
-        if (pose !== lastPoseRef.current) {
-          lastPoseRef.current = pose;
-          setCurrentPose(pose);
-        }
-        // VRM 新骨骼轨道：每帧同步
-        setCurrentVRMPose(driver.getCurrentVRMPose());
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-
-    // 驱动管线就绪，结束计时
-    startupTracker.end('voicesign-vrm-load');
-    startupTracker.end('voicesign-init');
-
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      // 卸载时停止播放并释放资源
-      avatarDriverRef.current?.stop();
-      queueRef.current = [];
-      isPlayingRef.current = false;
-      lastTimeRef.current = 0;
-    };
-  }, []);
-
   // ===== 语速调节：实时同步到 AvatarDriver =====
   const handleSpeedChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
       const speed = parseFloat(e.target.value);
       setPlaybackSpeed(speed);
-      avatarDriverRef.current?.setSpeed(speed);
+      setSpeed(speed);
     },
-    [setPlaybackSpeed],
+    [setPlaybackSpeed, setSpeed],
   );
 
   // ===== 停止播放：清空队列并重置状态 =====
   const handleStop = useCallback(() => {
-    avatarDriverRef.current?.stop();
-    queueRef.current = [];
-    isPlayingRef.current = false;
+    stopPipeline();
     setIsPlaying(false);
     // 手动停止：管道回到空闲
     setPipelineStatus('idle');
-  }, [setIsPlaying]);
+  }, [stopPipeline, setIsPlaying]);
+
+  // 组件卸载时停止播放并清理队列
+  useEffect(() => {
+    return () => {
+      stopPipeline();
+    };
+  }, [stopPipeline]);
 
   return (
     <div className="flex flex-col gap-4 md:gap-6">

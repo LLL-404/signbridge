@@ -2,10 +2,15 @@
 // 封装 AvatarDriver 的初始化、rAF 更新循环与姿态状态管理
 // 供学习模块各子组件复用，避免重复编写驱动逻辑
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { VRM } from '@pixiv/three-vrm';
 import { AvatarDriver } from '@/modules/avatar/AvatarDriver';
+import type { VRMAnimator } from '@/modules/avatar/VRMAnimator';
 import type { BonePose, VRMPose } from '@/types/avatar';
 import { NEUTRAL_POSE, NEUTRAL_VRM_POSE } from '@/types/avatar';
 import type { GlossSequence } from '@/types/grammar';
+import { logger } from '@/modules/debug/logger';
+
+const log = logger.module('useAvatarPlayer');
 
 /** useAvatarPlayer 返回值 */
 export interface UseAvatarPlayerReturn {
@@ -21,6 +26,10 @@ export interface UseAvatarPlayerReturn {
   playSequence: (sequence: GlossSequence, onComplete?: () => void) => Promise<void>;
   /** 停止播放 */
   stop: () => void;
+  /** 注入 VRMAnimator 与 VRM 实例（VRM 加载完成后调用，让 AvatarDriver 能驱动 VRM 动画） */
+  setVRMAnimator: (vrm: VRM, animator: VRMAnimator) => void;
+  /** 设置播放速度 */
+  setSpeed: (speed: number) => void;
 }
 
 /**
@@ -92,5 +101,16 @@ export function useAvatarPlayer(): UseAvatarPlayerReturn {
     if (mountedRef.current) setIsPlaying(false);
   }, []);
 
-  return { pose, vrmPose, isPlaying, playGloss, playSequence, stop };
+  /** 注入 VRMAnimator 与 VRM 实例 */
+  const setVRMAnimator = useCallback((vrm: VRM, animator: VRMAnimator): void => {
+    driverRef.current.setVRMAnimator(vrm, animator);
+    log.info('VRM 已加载并绑定到 AvatarDriver');
+  }, []);
+
+  /** 设置播放速度 */
+  const setSpeed = useCallback((speed: number): void => {
+    driverRef.current.setSpeed(speed);
+  }, []);
+
+  return { pose, vrmPose, isPlaying, playGloss, playSequence, stop, setVRMAnimator, setSpeed };
 }

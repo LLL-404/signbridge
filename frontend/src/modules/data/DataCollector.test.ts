@@ -23,7 +23,7 @@ import type { CollectedSample } from './DataCollector';
 
 // ===== Mock Normalizer =====
 const normalizeSpy = vi.hoisted(() => vi.fn());
-vi.mock('@/modules/recognition/Normalizer', () => ({
+vi.mock('@/modules/normalize/Normalizer', () => ({
   Normalizer: vi.fn().mockImplementation(() => ({
     normalize: normalizeSpy,
   })),
