@@ -150,6 +150,15 @@ export default defineConfig({
   // 必须排除在浏览器构建之外：dev 服务器不预打包，生产构建不引入
   optimizeDeps: {
     exclude: ['@tensorflow/tfjs-node'],
+    // 显式预构建重量级依赖，避免首次访问页面时触发 "new dependencies optimized, reloading"
+    // three: VoiceToSignPage → AvatarDriver 同步链直接引入（7 个文件 import * as THREE）
+    // @pixiv/three-vrm / @react-three/fiber / @react-three/drei: Avatar3D lazy 加载需要，预构建消除首次 3D 渲染卡顿
+    include: [
+      'three',
+      '@pixiv/three-vrm',
+      '@react-three/fiber',
+      '@react-three/drei',
+    ],
   },
   server: {
     port: 5173,

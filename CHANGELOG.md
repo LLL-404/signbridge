@@ -32,6 +32,7 @@
 - fix(stgcn): GraphConvLayer.call() 梯度计算修复——TF.js 4.22.0 中 3D×2D BatchMatMul 梯度形状不匹配、Einsum op 无梯度函数；改用 2D matMul + reshape/transpose 链（X@W 展平为 (B*F*N, inCh)×(inCh, outCh)，A@XW 转置让 N 成首维）；邻接矩阵缓存改为纯 number[][] 数据避免跨 tf.tidy scope 引用导致的 moveData backend 错误
 - fix(build): 修复 @vitest/coverage-v8@^4.1.9 与 vitest@3.2.7 主版本不匹配导致 npm install ERESOLVE 错误——降级 @vitest/coverage-v8 到 ^3.2.7 与 vitest 完全对齐，npm install 不再需要 --legacy-peer-deps
 - fix(build): 修复 vite build 的 `Circular chunk: tfjs-backend -> tfjs-other -> tfjs-backend` 警告——根因是 @tensorflow/tfjs meta-package 的 re-export 与子包运行时依赖方向相反形成循环；在 vite.config.ts manualChunks 中将 meta-package 单独分到 tfjs-meta chunk 切断循环，新增 chunk gzip 0.11 kB，首屏体积无退化
+- fix(perf): 修复 Vite dev server 首次访问 /voice-to-sign 时触发 "new dependencies optimized, reloading" 页面刷新——根因是 optimizeDeps 缺少 include，VoiceToSignPage → AvatarDriver → three 的同步链首次加载时 Vite 现场预构建 three.js 导致页面刷新；在 optimizeDeps.include 中显式预构建 three / @pixiv/three-vrm / @react-three/fiber / @react-three/drei，冷启动即预构建，消除运行时重新预构建
 
 ### ⚡ 性能
 - perf(build): vite.config.ts manualChunks vendor 细分——three-vendor 833KB 拆分为 `three-core` (684KB, three/build 核心) + `three-examples` (94KB, GLTFLoader/FBXLoader) + `three-vrm` (138KB, @pixiv/three-vrm) + `react-three` (147KB, @react-three/fiber+drei)；tfjs-vendor 1.6MB 拆分为 `tfjs-core` (584KB) + `tfjs-backend` (528KB) + `tfjs-converter` (3.6KB) + `tfjs-other` (485KB)；移除 5 个业务 module 分包让 Vite 默认按路由自动拆分；首屏不进 3D 页面时仅需 react-vendor + main + state-vendor + 页面 chunk
