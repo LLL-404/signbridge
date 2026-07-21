@@ -41,15 +41,20 @@ export interface UseAvatarPlayerReturn {
 export function useAvatarPlayer(): UseAvatarPlayerReturn {
   const driverRef = useRef<AvatarDriver>(new AvatarDriver());
   const [pose, setPose] = useState<BonePose>(NEUTRAL_POSE);
-  const [vrmPose, setVrmPose] = useState<VRMPose>(NEUTRAL_VRM_POSE);
   const [isPlaying, setIsPlaying] = useState(false);
 
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(performance.now());
   // 标记组件是否已卸载，避免卸载后 setState
   const mountedRef = useRef(true);
+  // pose 节流：rAF 仍以 60fps 驱动 AvatarDriver.update，但 setPose 节流到 ~30fps，
+  // 避免每帧触发整条 React 组件树重渲染。
+  // VRM 动画由 useVRMModel 内部 useFrame 自驱（vrmAnimator.update），不依赖此 state；
+  // Avatar2D / SkeletonAvatarModel 通过 useEffect([pose]) 重绘，30fps 对手语动作足够流畅。
+  const lastPoseUpdateRef = useRef<number>(0);
+  const POSE_UPDATE_INTERVAL_MS = 33; // ≈30fps
 
-  // rAF 循环：每帧驱动 AvatarDriver 更新并同步姿态
+  // rAF 循环：每帧驱动 AvatarDriver 更新，节流同步姿态到 state
   useEffect(() => {
     mountedRef.current = true;
     const loop = (): void => {
@@ -58,11 +63,12 @@ export function useAvatarPlayer(): UseAvatarPlayerReturn {
       lastTimeRef.current = now;
 
       const driver = driverRef.current;
+      // driver.update 始终以 60fps 推进，保证 VRM 动画与穿模检测时序正确
       driver.update(delta);
-      // 仅在组件存活时更新状态
-      if (mountedRef.current) {
+      // setPose 节流到 ~30fps：减少 React 重渲染频率
+      if (mountedRef.current && now - lastPoseUpdateRef.current >= POSE_UPDATE_INTERVAL_MS) {
+        lastPoseUpdateRef.current = now;
         setPose(driver.getCurrentPose());
-        setVrmPose(driver.getCurrentVRMPose());
       }
       rafRef.current = requestAnimationFrame(loop);
     };
@@ -112,5 +118,8 @@ export function useAvatarPlayer(): UseAvatarPlayerReturn {
     driverRef.current.setSpeed(speed);
   }, []);
 
-  return { pose, vrmPose, isPlaying, playGloss, playSequence, stop, setVRMAnimator, setSpeed };
+  // vrmPose 直接返回常量：新架构下 VRM 动画由 VRMAnimator 内部 AnimationMixer 驱动，
+  // AvatarDriver.getCurrentVRMPose() 也仅返回 NEUTRAL_VRM_POSE，无需 state 化（避免无用 setState 调用）。
+  // 保留字段以维持 UseAvatarPlayerReturn 接口兼容，调用方无需改动。
+  return { pose, vrmPose: NEUTRAL_VRM_POSE, isPlaying, playGloss, playSequence, stop, setVRMAnimator, setSpeed };
 }

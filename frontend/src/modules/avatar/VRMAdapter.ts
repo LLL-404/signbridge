@@ -177,6 +177,22 @@ export class VRMAdapter {
     return this.vrm;
   }
 
+  /**
+   * 直接设置 VRM 实例，用于复用外部已加载的 VRM（如来自 VRMCache）。
+   *
+   * 与 load() 的区别：
+   * - load() 会异步从 URL 加载并将 vrm.scene 添加到传入的 THREE.Scene
+   * - setVRM 仅赋值内部 vrm 字段，不触发加载、不操作场景图、不释放旧实例
+   *
+   * 旧 VRM 实例（如有）的生命周期由调用方负责（参见 useVRMModel 中
+   * 通过 VRMCache.loadVRM 统一管理 + useEffect cleanup 移除 scene）。
+   *
+   * @param vrm 已加载的 VRM 实例
+   */
+  setVRM(vrm: VRM): void {
+    this.vrm = vrm;
+  }
+
   /** 获取 VRM 场景对象（用于添加到场景） */
   getScene(): THREE.Object3D | null {
     return this.vrm?.scene ?? null;

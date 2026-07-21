@@ -123,12 +123,15 @@ interface ModelScale {
 
 const MODEL_SCALE_CACHE = new WeakMap<VRM, ModelScale>();
 
-// ===== VRMC 约束状态（由 buildClip 入口设置，solveArmQuaternions 读取）=====
-// 当前 VRM 模型的约束缓存（buildClip 入口从全局缓存读取，避免每帧重复读取）
-let currentVRMConstraints: VRMConstraintMap = new Map();
-// 本 clip 的 VRMC 约束命中/回退统计（buildClip 入口重置，末尾输出日志）
-let vrmcHitCount = 0;
-let vrmcFallbackCount = 0;
+// ===== VRMC 约束构建上下文 =====
+// 显式传递的单次构建状态：替代原模块级可变变量，使 buildClip 可重入、可并发、可测试。
+// - vrmConstraints: 当前 VRM 模型的约束缓存（buildClip 入口从全局缓存读取，避免每帧重复读取）
+// - vrmcHitCount / vrmcFallbackCount: 本 clip 的 VRMC 约束命中/回退统计（buildClip 入口初始化，末尾输出日志）
+interface ClipBuildContext {
+  vrmConstraints: VRMConstraintMap;
+  vrmcHitCount: number;
+  vrmcFallbackCount: number;
+}
 
 // ===== 辅助函数 =====
 
@@ -432,6 +435,7 @@ function solveArmQuaternions(
   side: 'left' | 'right',
   upperRestDir: THREE.Vector3,
   lowerRestDir: THREE.Vector3,
+  ctx: ClipBuildContext,
   bodyVolume?: BodyVolume,
   hipsDir?: THREE.Vector3,
   previousElbowDir?: THREE.Vector3,
@@ -620,17 +624,17 @@ function solveArmQuaternions(
 
   // === 8. VRMC_node_constraint 约束（如有） ===
   // 优先使用 VRM 1.0 模型内置约束（roll/aim/rotation），无约束时跳过本步骤
-  // 约束缓存由 VRMModel.tsx 在 VRM 加载时填充，由 buildClip 入口写入 currentVRMConstraints
-  if (currentVRMConstraints.size > 0) {
+  // 约束缓存由 VRMModel.tsx 在 VRM 加载时填充，由 buildClip 入口写入 ctx.vrmConstraints
+  if (ctx.vrmConstraints.size > 0) {
     const upperBoneName = side === 'left' ? 'leftUpperArm' : 'rightUpperArm';
     const lowerBoneName = side === 'left' ? 'leftLowerArm' : 'rightLowerArm';
-    const result = applyVRMCConstraints(upperQuat, lowerQuat, upperBoneName, lowerBoneName, currentVRMConstraints);
+    const result = applyVRMCConstraints(upperQuat, lowerQuat, upperBoneName, lowerBoneName, ctx.vrmConstraints);
     if (result.applied) {
       upperQuat.copy(result.upper);
       lowerQuat.copy(result.lower);
-      vrmcHitCount++;
+      ctx.vrmcHitCount++;
     } else {
-      vrmcFallbackCount++;
+      ctx.vrmcFallbackCount++;
     }
   }
 
@@ -671,6 +675,7 @@ function buildArmTracks(
   movement: Movement,
   palmOrientation: PalmOrientation,
   clipLabel: string,
+  ctx: ClipBuildContext,
 ): THREE.QuaternionKeyframeTrack[] {
   const humanoid = vrm.humanoid;
   const upperBoneName = side === 'left' ? 'leftUpperArm' : 'rightUpperArm';
@@ -768,6 +773,7 @@ function buildArmTracks(
       side,
       upperRestDir,
       lowerRestDir,
+      ctx,
       bodyVolume,      // 传入用于肘部穿透检测
       hipsDir,         // 传入用于肘引导方向动态化
       prevElbowDir,    // 传入上一帧 elbowDir 保持连续性
@@ -1085,10 +1091,13 @@ export class ClipBuilder {
    * @returns THREE.AnimationClip，包含肩、肘、手指、表情轨道
    */
   static buildClip(gloss: SignGloss, vrm: VRM): THREE.AnimationClip {
-    // 初始化本 clip 的 VRMC 约束状态：从全局缓存读取约束映射，重置命中/回退计数
-    currentVRMConstraints = getVRMConstraintCache(vrm);
-    vrmcHitCount = 0;
-    vrmcFallbackCount = 0;
+    // 初始化本 clip 的 VRMC 约束构建上下文：从全局缓存读取约束映射，重置命中/回退计数。
+    // 显式 ctx 替代模块级可变变量，使 buildClip 可重入、可并发、可独立测试。
+    const ctx: ClipBuildContext = {
+      vrmConstraints: getVRMConstraintCache(vrm),
+      vrmcHitCount: 0,
+      vrmcFallbackCount: 0,
+    };
 
     const m = gloss.manual;
     const dominant = m.dominant_hand;
@@ -1123,7 +1132,7 @@ export class ClipBuilder {
     // 1. 主导手手臂轨道（肩 + 肘 + 手腕）
     const domArmTracks = buildArmTracks(
       vrm, dominant, startOffset, endOffset, durationSec, hipsSceneLocal, scale,
-      m.movement as Movement, parsePalmOrientation(m.palm_orientation), gloss.gloss_id,
+      m.movement as Movement, parsePalmOrientation(m.palm_orientation), gloss.gloss_id, ctx,
     );
     tracks.push(...domArmTracks);
 
@@ -1139,7 +1148,7 @@ export class ClipBuilder {
       const mirrorEnd = { x: -endOffset.x, y: endOffset.y, z: endOffset.z };
       const nonDomArmTracks = buildArmTracks(
         vrm, nonDominant, mirrorStart, mirrorEnd, durationSec, hipsSceneLocal, scale,
-        m.movement as Movement, parsePalmOrientation(m.palm_orientation), gloss.gloss_id,
+        m.movement as Movement, parsePalmOrientation(m.palm_orientation), gloss.gloss_id, ctx,
       );
       tracks.push(...nonDomArmTracks);
       const nonDomFingerTracks = buildFingerTracks(vrm, nonDominant, shapeStart, shapeEnd, durationSec);
@@ -1176,7 +1185,7 @@ export class ClipBuilder {
     });
     // VRMC 约束统计：命中数表示成功应用 roll 分布的采样点数，回退数为跳过的采样点数
     log.info(
-      `[VRMC约束] ${gloss.gloss_id} | 命中=${vrmcHitCount} | 回退=${vrmcFallbackCount} | 总约束数=${currentVRMConstraints.size}`,
+      `[VRMC约束] ${gloss.gloss_id} | 命中=${ctx.vrmcHitCount} | 回退=${ctx.vrmcFallbackCount} | 总约束数=${ctx.vrmConstraints.size}`,
     );
     return clip;
   }

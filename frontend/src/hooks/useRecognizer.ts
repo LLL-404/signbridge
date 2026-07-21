@@ -188,7 +188,6 @@ export function useRecognizer(options: UseRecognizerOptions = {}): UseRecognizer
       ruleRecognizerRef.current?.dispose();
     };
     // 初始化 effect：仅挂载时运行一次，内部依赖均为稳定引用（refs/setState）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [singleFrame]);
 
   // 初始化序列识别管道
@@ -221,7 +220,6 @@ export function useRecognizer(options: UseRecognizerOptions = {}): UseRecognizer
       classifierRef.current?.cancelInit();
       classifierRef.current?.dispose();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sequence]);
 
   /** 识别单帧：内部 try-catch，失败返回 null */

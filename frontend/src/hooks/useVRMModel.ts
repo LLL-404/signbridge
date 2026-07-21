@@ -198,9 +198,9 @@ export function useVRMModel(options: UseVRMModelOptions = {}): UseVRMModelReturn
         }
 
         // 将已加载的 VRM 绑定到 VRMAdapter，供 RealtimePoseDriver 使用
-        // VRMAdapter.vrm 是 private 字段，这里通过类型断言设置，避免修改 VRMAdapter 接口
-        // 也避免重复调用 VRMAdapter.load() 导致模型被加载两次
-        (vrmAdapterRef.current as unknown as { vrm: VRM | null }).vrm = vrm;
+        // 通过公开方法 setVRM 设置内部 vrm 字段，避免重复调用 VRMAdapter.load() 重复加载
+        // VRMAdapter 在 ref 初始化时已创建（参见上方 vrmAdapterRef 初始化块），此处 current 必非 null
+        vrmAdapterRef.current?.setVRM(vrm);
 
         // 创建 VRMAnimator 实例（封装 THREE.AnimationMixer）
         // 与 AvatarDriver 共享同一份实例：AvatarDriver.playClip 触发动画，

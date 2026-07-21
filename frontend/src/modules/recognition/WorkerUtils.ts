@@ -268,9 +268,15 @@ export async function loadGestureLibrary(): Promise<GestureDefinition[]> {
         const tx = db.transaction('gestures', 'readonly');
         const getAll = tx.objectStore('gestures').getAll();
         getAll.onsuccess = () => resolve(getAll.result as GestureDefinition[]);
-        getAll.onerror = () => resolve([]);
+        getAll.onerror = () => {
+          log.warn('读取自定义手势 store 失败，返回空列表', getAll.error);
+          resolve([]);
+        };
       };
-      req.onerror = () => resolve([]);
+      req.onerror = () => {
+        log.warn('打开自定义手势 DB 失败，返回空列表', req.error);
+        resolve([]);
+      };
     });
     if (custom.length > 0) {
       gestures = [...gestures, ...custom];

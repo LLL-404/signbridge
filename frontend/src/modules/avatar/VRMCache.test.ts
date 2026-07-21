@@ -458,4 +458,34 @@ describe('VRMCache', () => {
     await loadVRM('https://example.com/other.vrm');
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
+
+  it('IDB 打开失败后 dbPromise 应自动重置，允许下次调用重新初始化', async () => {
+    // 第一次：IDB 打开失败，loadVRM 应回退到 HTTP
+    globalThis.indexedDB = createFakeIndexedDB({ failOpen: true });
+    clearVRMCache();
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockClear();
+    const vrm1 = await loadVRM(TEST_URL);
+    expect(vrm1).toBeDefined();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1); // 回退 HTTP
+
+    // 等待 catch 回调执行（重置 dbPromise 为 null）
+    await flushIDBTimers();
+
+    // 第二次：换用正常 IDB，**不调用 _resetForTesting**
+    // 若 dbPromise 未被自动重置，此处会复用 rejected Promise，永远无法打开 IDB
+    globalThis.indexedDB = createFakeIndexedDB();
+    clearVRMCache();
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockClear();
+    await loadVRM(TEST_URL); // 新 IDB 为空，走 HTTP 并持久化
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+    // 等待持久化完成
+    await flushIDBTimers();
+    clearVRMCache();
+
+    // 第三次：应从 IDB 命中（证明 dbPromise 已重置且新 IDB 可用）
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockClear();
+    await loadVRM(TEST_URL);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
 });

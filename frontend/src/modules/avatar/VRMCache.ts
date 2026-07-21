@@ -50,7 +50,7 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 /** 打开并初始化 VRM 缓存数据库 */
 function openVRMCacheDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+  const promise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
@@ -60,6 +60,12 @@ function openVRMCacheDB(): Promise<IDBDatabase> {
         db.createObjectStore(STORE_NAME, { keyPath: 'key' });
       }
     };
+  });
+  // 失败时重置 dbPromise 为 null，允许下次调用重新初始化；
+  // 否则 rejected Promise 会被缓存，后续所有 IDB 操作将永久失败无法恢复
+  dbPromise = promise.catch((err) => {
+    dbPromise = null;
+    throw err;
   });
   return dbPromise;
 }

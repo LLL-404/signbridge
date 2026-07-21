@@ -38,6 +38,8 @@ export function DataCollectionPanel() {
 
   const rafRef = useRef<number | null>(null);
   const runningRef = useRef(false);
+  // 收集所有 setTimeout 返回的 timer ID，便于组件卸载时统一清理
+  const timersRef = useRef<number[]>([]);
 
   const {
     videoRef,
@@ -53,6 +55,14 @@ export function DataCollectionPanel() {
     vocabularyStore.getAll().then((words) => setGlossary(words));
     refreshDatasetStats();
     return () => { stopTracking(); runningRef.current = false; };
+  }, []);
+
+  // 组件卸载时清理所有未完成的定时器，避免资源泄漏
+  useEffect(() => {
+    return () => {
+      timersRef.current.forEach((id) => clearTimeout(id));
+      timersRef.current = [];
+    };
   }, []);
 
   useEffect(() => {
@@ -91,7 +101,8 @@ export function DataCollectionPanel() {
   const handleStart = useCallback(async () => {
     if (!selectedGloss) {
       setMessage('请先选择一个词汇');
-      setTimeout(() => setMessage(null), 2000);
+      const timer = window.setTimeout(() => setMessage(null), 2000);
+      timersRef.current.push(timer);
       return;
     }
     if (!isTracking) {
@@ -113,7 +124,8 @@ export function DataCollectionPanel() {
     const frames = dataCollector.stopRecording();
     if (!frames) {
       setMessage('录制帧数不足，请重试');
-      setTimeout(() => setMessage(null), 2000);
+      const timer = window.setTimeout(() => setMessage(null), 2000);
+      timersRef.current.push(timer);
       dataCollector.reset();
       setState('idle');
       return;
@@ -130,7 +142,8 @@ export function DataCollectionPanel() {
       setState('idle');
       dataCollector.reset();
       refreshDatasetStats();
-      setTimeout(() => setMessage(null), 2000);
+      const timer = window.setTimeout(() => setMessage(null), 2000);
+      timersRef.current.push(timer);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '保存失败');
     }
@@ -140,7 +153,8 @@ export function DataCollectionPanel() {
     dataCollector.discardSample();
     setState('idle');
     setMessage('已丢弃');
-    setTimeout(() => setMessage(null), 1500);
+    const timer = window.setTimeout(() => setMessage(null), 1500);
+    timersRef.current.push(timer);
   };
 
   const qualityPercent = Math.round(stats.qualityScore * 100);

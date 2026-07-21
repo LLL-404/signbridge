@@ -83,6 +83,12 @@ export function SignToTextPage() {
   const runningRef = useRef(false);
   const historyIdRef = useRef(0);
 
+  // 帧循环 setState 上次值缓存：仅当值实际变化时才触发 setState，避免每帧冗余调度
+  const lastGestureSeqKeyRef = useRef<string>('');
+  const lastCombinedTextRef = useRef('');
+  const lastStatusRef = useRef<RecognitionStatus>('idle');
+  const lastDegradedModeRef = useRef(false);
+
   /** 在 canvas 上绘制视频帧（镜像翻转以匹配用户视角） */
   const drawFrame = useCallback(() => {
     const video = videoRef.current;
@@ -120,8 +126,19 @@ export function SignToTextPage() {
 
       // 连续手势识别（内置稳定检测 + 序列组合）
       const continuousResult = processContinuous(recognition);
-      setGestureSequence(continuousResult.sequence);
-      setCombinedText(continuousResult.combinedText);
+
+      // 仅在 sequence 内容变化时 setState（用 JSON key 比较数组内容）
+      const seqKey = JSON.stringify(continuousResult.sequence);
+      if (seqKey !== lastGestureSeqKeyRef.current) {
+        lastGestureSeqKeyRef.current = seqKey;
+        setGestureSequence(continuousResult.sequence);
+      }
+
+      // 仅在 combinedText 变化时 setState
+      if (continuousResult.combinedText !== lastCombinedTextRef.current) {
+        lastCombinedTextRef.current = continuousResult.combinedText;
+        setCombinedText(continuousResult.combinedText);
+      }
 
       if (continuousResult.newGesture) {
         // 检测到新的稳定手势加入序列
@@ -132,7 +149,11 @@ export function SignToTextPage() {
             chinese: lastGesture.chinese,
             confidence: lastGesture.confidence,
           });
-          setStatus('result');
+          // 仅在 status 变化时 setState
+          if (lastStatusRef.current !== 'result') {
+            lastStatusRef.current = 'result';
+            setStatus('result');
+          }
           const itemId = historyIdRef.current++;
           setHistory((prev) =>
             [
@@ -148,13 +169,23 @@ export function SignToTextPage() {
           );
         }
       } else if (recognition && recognition.gloss_id !== 'none') {
-        setStatus('capturing');
+        if (lastStatusRef.current !== 'capturing') {
+          lastStatusRef.current = 'capturing';
+          setStatus('capturing');
+        }
       } else {
-        setStatus('waiting');
+        if (lastStatusRef.current !== 'waiting') {
+          lastStatusRef.current = 'waiting';
+          setStatus('waiting');
+        }
       }
 
-      // 更新降级模式状态（Worker 崩溃后 hook 内部自动降级）
-      setDegradedMode(isDegraded());
+      // 更新降级模式状态（Worker 崩溃后 hook 内部自动降级）；仅在变化时 setState
+      const degradedNow = isDegraded();
+      if (degradedNow !== lastDegradedModeRef.current) {
+        lastDegradedModeRef.current = degradedNow;
+        setDegradedMode(degradedNow);
+      }
     } catch {
       // 识别错误已在 hook 内部记录；此处静默以保持帧循环
     }

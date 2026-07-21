@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Component, lazy, memo, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { VRM } from '@pixiv/three-vrm';
 import type { BonePose, VRMPose } from '@/types/avatar';
 import type { VRMAnimator } from '@/modules/avatar/VRMAnimator';
@@ -111,7 +111,7 @@ function useContainerSize(containerRef: React.RefObject<HTMLDivElement | null>) 
   return size;
 }
 
-export default function AvatarCanvas({
+function AvatarCanvasInner({
   pose,
   vrmPose,
   width = '100%',
@@ -197,3 +197,14 @@ export default function AvatarCanvas({
     </div>
   );
 }
+
+/**
+ * memo 浅比较说明：
+ * - pose / vrmPose：useAvatarPlayer 已将 vrmPose 改为常量引用（NEUTRAL_VRM_POSE），
+ *   pose 通过节流后的 setPose 更新，每次都是新对象引用，memo 不会阻止必要的重渲染；
+ *   当父组件因其他 state 变化重渲染但 pose 引用未变时，memo 才会跳过——这正是期望行为。
+ * - onVRMLoaded / onVRMLoadError：调用方应使用 useCallback 稳定引用（已是项目惯例）。
+ * - width / height / className / style：通常为字面量或稳定引用。
+ * - 内部 useAvatarStore 订阅不受 memo 影响，store 变化仍会触发重渲染。
+ */
+export default memo(AvatarCanvasInner);

@@ -114,15 +114,22 @@ export function PracticeFlow({
     [selectWord, onWordSelected],
   );
 
+  // 用 ref 同步 pickWord 与 initialGloss 的最新引用，避免挂载 effect 闭包捕获陈旧值
+  const pickWordRef = useRef(pickWord);
+  const initialGlossRef = useRef(initialGloss);
+  useEffect(() => {
+    pickWordRef.current = pickWord;
+    initialGlossRef.current = initialGloss;
+  }, [pickWord, initialGloss]);
+
   // 加载词汇库并出第一题（仅在未提供 initialGloss 时）
   useEffect(() => {
     vocabularyStore.getAll().then((words) => {
       setAllWords(words);
-      if (!initialGloss) {
-        pickWord(words);
+      if (!initialGlossRef.current) {
+        pickWordRef.current(words);
       }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** 点击"开始模仿/答题"：启动摄像头进入捕捉阶段 */
