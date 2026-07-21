@@ -9,6 +9,7 @@
 ## [Unreleased]
 
 ### 🔧 修复
+- fix(e2e): 修复 CI 中 `app.spec.ts:33` 导航到 `/learning` 时 `net::ERR_ABORTED` 60s 超时失败——根因是 Playwright Chromium 环境无 WebGL，TF.js 回退到 CPU backend，`SequenceClassifier.init()` 触发的 `ModelTrainer.trainAndExport()` 同步阻塞主线程 30-60s，`useRecognizer` cleanup 无法取消训练导致 microtask 阻止页面卸载；修复方案：(1) 在 `app.spec.ts` 的 `/sign-to-text` 和 `/dialogue` 导航后添加 `page.evaluate(() => {})` yield 点，让浏览器完成 pending microtask；(2) `SequenceClassifier` 添加 `cancelled` 标志和 `cancelInit()` 方法，`init()` 每个 await 后检查并提前退出，`dispose()` 同步设置取消标志作为安全兜底；(3) `useRecognizer` cleanup 先调用 `cancelInit()` 再 `dispose()`；本地全量 E2E 23 passed + 1 skipped 通过
 - fix(arch): 修复 `modules/data` ↔ `modules/recognition` 循环依赖——将 `Normalizer.ts` 从 `modules/recognition/` 下沉到独立的 `modules/normalize/` 目录（含单元测试同步迁移），打破 data → recognition 方向的依赖；recognition → data 方向的合理数据访问保留；`depcruise` 验证无循环依赖（161 modules, 509 dependencies, 0 violations）
 - fix(arch): VRMModel.tsx 通过 useVRMModel hook 间接访问 modules——新建 `hooks/useVRMModel.ts`（280 行）封装 VRM 加载、约束计算、实时驱动、PoseEstimator 访问的全部逻辑；VRMModel.tsx 从 284 行压缩到 43 行（-85%），6 处违规 import（5 处 `@/modules/avatar/*` + 1 处 `@/modules/recognition/*`）全部消除
 - fix(arch): 3 个页面通过 hooks 间接访问 modules——新增 `useGrammarEngine` / `useAvatarPipeline` / `useRecognizer` 三个 hooks；`useAvatarPipeline` 复用已存在的 `useAvatarPlayer`，消除 VoiceToSignPage 与 DialoguePage 约 50 行重复的 AvatarDriver 实例化代码；3 个页面共 13 处 `@/modules/*` 违规 import 全部清零（连 types import 也迁移到 hooks 重新导出）

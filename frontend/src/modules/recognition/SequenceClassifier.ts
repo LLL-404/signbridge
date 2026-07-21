@@ -21,26 +21,35 @@ export class SequenceClassifier {
   private ready = false;
   /** 是否正在初始化（避免并发重复初始化） */
   private initializing = false;
+  /** 是否已取消初始化（cleanup 时设置为 true，让 init 在下一个 await 点退出） */
+  private cancelled = false;
 
   /**
    * 初始化：加载模型与标签映射
    * 若模型不存在则自动训练
+   *
+   * 注意：TF.js 在 CPU backend 上训练会同步阻塞主线程，无法真正终止 model.fit()。
+   * cancelled 标志只能让 init 在下一个 await 点退出，避免训练完成后继续执行赋值等副作用。
    */
   async init(): Promise<void> {
     // 避免并发初始化
     if (this.ready || this.initializing) return;
     this.initializing = true;
+    this.cancelled = false;
 
     try {
       await idbAdapter.init();
+      if (this.cancelled) return;
 
       // 尝试加载标签映射
       const labelMap = await this.loadLabelMap();
+      if (this.cancelled) return;
 
       if (labelMap && labelMap.labels.length > 0) {
         // 标签映射存在，尝试加载模型
         try {
           await this.model.load(MODEL_STORAGE_PATH);
+          if (this.cancelled) return;
           this.labels = labelMap.labels;
           this.ready = true;
           return;
@@ -52,15 +61,26 @@ export class SequenceClassifier {
       // 模型或标签不存在，触发训练
       const trainer = new ModelTrainer();
       await trainer.trainAndExport();
+      if (this.cancelled) return;
 
       // 训练完成后重新加载
       await this.model.load(MODEL_STORAGE_PATH);
+      if (this.cancelled) return;
       const newLabelMap = await this.loadLabelMap();
       this.labels = newLabelMap?.labels ?? [];
       this.ready = true;
     } finally {
       this.initializing = false;
     }
+  }
+
+  /**
+   * 取消初始化
+   * 让 init() 在下一个 await 点退出，避免组件卸载后继续执行副作用。
+   * 注意：无法真正终止正在进行的 TF.js model.fit() 调用。
+   */
+  cancelInit(): void {
+    this.cancelled = true;
   }
 
   /**
@@ -108,6 +128,9 @@ export class SequenceClassifier {
 
   /** 释放资源 */
   dispose(): void {
+    // 同步设置取消标志，防止 init() 在 dispose() 后继续执行副作用
+    // （如训练完成后给已释放的 model 赋值）
+    this.cancelled = true;
     this.model.dispose();
     this.ready = false;
     this.labels = [];

@@ -216,6 +216,9 @@ export function useRecognizer(options: UseRecognizerOptions = {}): UseRecognizer
       });
     return () => {
       cancelled = true;
+      // 先取消初始化（让 init 在下一个 await 点退出），再释放资源
+      // 避免 TF.js 训练完成后继续执行赋值等副作用，同时防止 cleanup 时训练阻塞主线程
+      classifierRef.current?.cancelInit();
       classifierRef.current?.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -40,11 +40,17 @@ test.describe('应用启动与导航', () => {
 
     // 导航到手语识别
     await page.goto('/sign-to-text', { waitUntil: 'domcontentloaded' });
+    // yield 点：让浏览器完成 pending microtask（如 TF.js 训练、Worker 初始化），
+    // 避免下一次导航被阻塞导致 ERR_ABORTED
+    await page.evaluate(() => {});
     await page.waitForTimeout(1500);
     expect(page.url()).toContain('/sign-to-text');
 
     // 导航到双向对话
     await page.goto('/dialogue', { waitUntil: 'domcontentloaded' });
+    // yield 点：/dialogue 会触发 SequenceClassifier 初始化（可能启动 TF.js 训练），
+    // 必须让 microtask 完成否则 /learning 导航会被阻塞
+    await page.evaluate(() => {});
     await page.waitForTimeout(1500);
     expect(page.url()).toContain('/dialogue');
 
