@@ -30,7 +30,8 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import type { VRM } from '@pixiv/three-vrm';
-import { ClipBuilder } from './ClipBuilder';
+import { ClipBuilder, solveArmQuaternions, type ClipBuildContext } from './ClipBuilder';
+import { buildBodyVolume, isInsideTorso } from './BodyVolume';
 import { COMMON_VOCABULARY } from '@/modules/data/CommonVocabulary';
 import type { SignGloss } from '@/types/sign';
 import {
@@ -454,6 +455,80 @@ describe('无穿模断言 — 肘部和手腕不穿入躯干', () => {
         expect(armTracks.length).toBe(5);
       }
     }
+  });
+
+  // ===== 肘部穿透修正直接验证 =====
+  // 构造会导致肘部穿入躯干的手腕目标位置，验证 solveArmQuaternions 修正后
+  // 上臂方向（upper 四元数反推的肘部位置）不再穿入躯干包络体。
+  // 覆盖解析法路径（IK_MODE='analytic'，默认）。
+  it('肘部穿透修正后上臂方向不穿入躯干（解析法路径）', () => {
+    // 构建测试上下文：BodyVolume + 右臂几何参数
+    const bodyVolume = buildBodyVolume(vrm);
+    const ctx: ClipBuildContext = {
+      vrmConstraints: new Map(),
+      vrmcHitCount: 0,
+      vrmcFallbackCount: 0,
+    };
+
+    // 获取右肩在 scene 本地坐标系下的位置
+    const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm' as never)!;
+    const shoulderWorld = new THREE.Vector3();
+    rightUpperArm.getWorldPosition(shoulderWorld);
+    const shoulderSceneLocal = vrm.scene.worldToLocal(shoulderWorld.clone());
+
+    // T-pose 右臂 rest direction 与骨骼长度
+    const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm' as never)!;
+    const rightHand = vrm.humanoid.getNormalizedBoneNode('rightHand' as never)!;
+    const upperRestDir = rightLowerArm.position.clone().normalize();
+    const lowerRestDir = rightHand.position.clone().normalize();
+    const upperLen = rightLowerArm.position.length();
+    const lowerLen = rightHand.position.length();
+
+    // hips 方向（肘引导方向的动态参考）
+    const hipsNode = vrm.humanoid.getNormalizedBoneNode('hips' as never)!;
+    const hipsWorld = new THREE.Vector3();
+    hipsNode.getWorldPosition(hipsWorld);
+    const hipsSceneLocal = vrm.scene.worldToLocal(hipsWorld.clone());
+    const hipsDir = new THREE.Vector3().subVectors(hipsSceneLocal, shoulderSceneLocal).normalize();
+
+    // 构造多个靠近躯干中线的手腕目标，增加触发肘部穿透的概率
+    // 负 z 值（躯干后方）可抵消 elbowDir 的 +z 引导分量，让肘部穿入躯干
+    const testTargets = [
+      new THREE.Vector3(0.0, shoulderSceneLocal.y, -0.05),
+      new THREE.Vector3(0.0, shoulderSceneLocal.y, -0.10),
+      new THREE.Vector3(0.05, shoulderSceneLocal.y, -0.05),
+      new THREE.Vector3(0.0, shoulderSceneLocal.y - 0.10, -0.05),
+      new THREE.Vector3(-0.03, shoulderSceneLocal.y, -0.08),
+    ];
+
+    let penetrationTriggered = false;
+
+    for (const wristTarget of testTargets) {
+      const result = solveArmQuaternions(
+        shoulderSceneLocal,
+        wristTarget,
+        upperLen,
+        lowerLen,
+        'right',
+        upperRestDir,
+        lowerRestDir,
+        ctx,
+        bodyVolume,
+        hipsDir,
+      );
+
+      if (result.elbowPenetrated) {
+        penetrationTriggered = true;
+        // 从返回的 upper 四元数反推上臂方向与肘部位置
+        const upperArmDir = upperRestDir.clone().applyQuaternion(result.upper);
+        const elbowPos = shoulderSceneLocal.clone().add(upperArmDir.multiplyScalar(upperLen));
+        // 核心断言：修正后的肘部位置不穿入躯干
+        expect(isInsideTorso(elbowPos, bodyVolume)).toBe(false);
+      }
+    }
+
+    // 确保至少有一个测试目标触发了穿透修正（否则测试无效）
+    expect(penetrationTriggered).toBe(true);
   });
 });
 

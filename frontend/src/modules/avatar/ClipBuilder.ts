@@ -127,7 +127,7 @@ const MODEL_SCALE_CACHE = new WeakMap<VRM, ModelScale>();
 // 显式传递的单次构建状态：替代原模块级可变变量，使 buildClip 可重入、可并发、可测试。
 // - vrmConstraints: 当前 VRM 模型的约束缓存（buildClip 入口从全局缓存读取，避免每帧重复读取）
 // - vrmcHitCount / vrmcFallbackCount: 本 clip 的 VRMC 约束命中/回退统计（buildClip 入口初始化，末尾输出日志）
-interface ClipBuildContext {
+export interface ClipBuildContext {
   vrmConstraints: VRMConstraintMap;
   vrmcHitCount: number;
   vrmcFallbackCount: number;
@@ -427,7 +427,7 @@ function buildTrackName(node: THREE.Object3D): string {
  * 肩部旋转错误与肘部铰链轴错误。本函数把 upperRestDir/lowerRestDir 作为参数
  * 传入，用 setFromUnitVectors 直接构造四元数，避免方向假设错误。
  */
-function solveArmQuaternions(
+export function solveArmQuaternions(
   shoulderPos: THREE.Vector3,
   wristTarget: THREE.Vector3,
   upperLen: number,
@@ -489,6 +489,22 @@ function solveArmQuaternions(
       upperRestDir.clone().applyQuaternion(upperQuatFabrik).multiplyScalar(upperLen),
     );
     const elbowPenetratedFabrik = !!(bodyVolume && isInsideTorso(elbowPosFabrik, bodyVolume));
+
+    // 穿透修正：检测到肘部穿入躯干时，沿外法线投影到表面，并重算 upper/lower 四元数，
+    // 否则上臂骨骼仍指向穿入躯干的方向（与解析法路径同步修复）。
+    // 顺序与解析法一致：先重算 upper → 基于 upper 重算 lower → 约束 upper。
+    if (elbowPenetratedFabrik) {
+      const correctedElbowFabrik = projectToSurface(elbowPosFabrik, bodyVolume);
+      const upperArmDirFabrik = correctedElbowFabrik.clone().sub(shoulderPos).normalize();
+      upperQuatFabrik.setFromUnitVectors(upperRestDir, upperArmDirFabrik);
+      // 基于修正后的上臂重算前臂方向与 lowerQuat
+      const forearmDirFabrik = wristTarget.clone().sub(correctedElbowFabrik).normalize();
+      const invUpperFabrik = upperQuatFabrik.clone().invert();
+      const forearmLocalDirFabrik = forearmDirFabrik.applyQuaternion(invUpperFabrik);
+      lowerQuatFabrik.setFromUnitVectors(lowerRestDir, forearmLocalDirFabrik);
+      // 应用肩关节约束（与解析法路径步骤6 一致）
+      upperQuatFabrik.copy(constrainShoulderByDirection(upperQuatFabrik, upperRestDir));
+    }
 
     return {
       upper: upperQuatFabrik,
@@ -588,6 +604,11 @@ function solveArmQuaternions(
       original: elbowPos.clone(),
       corrected: correctedElbowPos.clone(),
     });
+    // 穿透修正后，上臂方向需指向修正后的肘位置，否则上臂骨骼仍穿入躯干。
+    // 用 correctedElbowPos 重算 upperArmDir 与 upperQuat，使上臂旋转与肘位置一致；
+    // 后续 invUpper/forearmLocalDir/lowerQuat 均基于修正后的 upperQuat，保持前臂几何一致。
+    upperArmDir.subVectors(correctedElbowPos, S).normalize();
+    upperQuat.setFromUnitVectors(upperRestDir, upperArmDir);
   }
 
   // 前臂方向（从修正后的肘到腕，世界坐标）
