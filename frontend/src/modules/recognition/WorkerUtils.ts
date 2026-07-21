@@ -5,6 +5,7 @@
 
 import type { ClassificationResult } from '@/types/recognition';
 import { logger } from '@/modules/debug/logger';
+import { appConfig } from '@/config';
 
 const log = logger.module('WorkerUtils');
 
@@ -249,7 +250,7 @@ export async function loadGestureLibrary(): Promise<GestureDefinition[]> {
 
   // 默认手势库
   try {
-    const res = await fetch('/gestures.json');
+    const res = await fetch(appConfig.gestureLibraryUrl);
     const lib: GestureLibrary = await res.json();
     gestures = lib.gestures;
   } catch (err) {

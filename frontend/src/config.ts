@@ -48,8 +48,8 @@ export const appConfig = {
     'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task',
   ),
 
-  /** 默认手势库 JSON 路径 */
-  gestureLibraryUrl: env('VITE_GESTURE_LIBRARY_URL', '/gestures.json'),
+  /** 默认手势库 JSON 路径（基于 Vite BASE_URL 拼接，兼容子路径部署） */
+  gestureLibraryUrl: env('VITE_GESTURE_LIBRARY_URL', import.meta.env.BASE_URL + 'gestures.json'),
 
   /** 词汇库 JSON 路径（基于 Vite BASE_URL 拼接，兼容子路径部署） */
   vocabularyUrl: env('VITE_VOCABULARY_URL', import.meta.env.BASE_URL + 'data/vocabulary.json'),
