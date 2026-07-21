@@ -43,13 +43,13 @@
 
 ## 阶段三：验证与提交
 
-- [ ] Task 9: 全量验证并提交
-  - [ ] SubTask 9.1: `npx tsc -b` exit 0
-  - [ ] SubTask 9.2: `npm run lint` 无新增 error（且 3 处 eslint-disable 已消除）
-  - [ ] SubTask 9.3: `npm run test` 全部通过（数量 ≥ 820）
-  - [ ] SubTask 9.4: `npm run build` 成功
-  - [ ] SubTask 9.5: 更新 [CHANGELOG.md](file:///d:/G/github/signbridge/CHANGELOG.md)
-  - [ ] SubTask 9.6: git commit（不 push）
+- [x] Task 9: 全量验证并提交
+  - [x] SubTask 9.1: `npx tsc -b` exit 0
+  - [x] SubTask 9.2: `npm run lint` 无新增 error（且 3 处 eslint-disable 已消除）
+  - [x] SubTask 9.3: `npm run test` 全部通过（数量 ≥ 820）
+  - [x] SubTask 9.4: `npm run build` 成功
+  - [x] SubTask 9.5: 更新 [CHANGELOG.md](file:///d:/G/github/signbridge/CHANGELOG.md)
+  - [x] SubTask 9.6: git commit（不 push）
 
 # Task Dependencies
 

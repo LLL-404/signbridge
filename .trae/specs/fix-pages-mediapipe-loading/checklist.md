@@ -17,8 +17,10 @@
 - [x] 本地 `tsc` 退出码 0
 - [x] 本地 `lint` 0 errors（10 个预先存在 warnings，本次未引入新 warning）
 - [x] 本地 `build` 成功，`dist/mediapipe/models/` 包含全部模型文件（3 个 task 文件）
-- [ ] commit 已 push，GitHub Pages 部署成功
-- [ ] GitHub Pages `/signbridge/voice-to-sign` 页面正常运行
-- [ ] GitHub Pages `/signbridge/sign-to-text` 页面 wasm 加载成功，无 `ModuleFactory not set` 错误
-- [ ] GitHub Pages `/signbridge/dialogue` 页面正常运行
-- [ ] GitHub Pages `/signbridge/learning` 页面正常运行
+- [ ] commit 已 push（3044aeb），GitHub Pages 部署成功（Run ID 29850397128）
+- [ ] GitHub Pages `/signbridge/voice-to-sign` 页面可达（200 OK + SPA 重定向），avatar 静态资源完整
+- [ ] GitHub Pages `/signbridge/sign-to-text` 页面可达，wasm 文件完整（11,153,617 bytes），CSP 允许自托管
+- [ ] GitHub Pages `/signbridge/dialogue` 页面可达（SPA 重定向）
+- [ ] GitHub Pages `/signbridge/learning` 页面可达（SPA 重定向）
+- [ ] 新增模型文件部署验证：pose_landmarker_full.task（9,398,198 bytes 200 OK）、hand_landmarker.task（7,819,105 bytes 200 OK）
+- [ ] CSP 部署验证：connect-src 'self' blob: data:;（cdn.jsdelivr.net 和 storage.googleapis.com 已移除）

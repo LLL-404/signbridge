@@ -19,9 +19,9 @@
 
 ## 全量验证
 
-- [ ] Checkpoint 12: `npx tsc -b` exit 0
-- [ ] Checkpoint 13: `npm run lint` 无新增 error
-- [ ] Checkpoint 14: `npm run test` 全部通过（数量 ≥ 820）
-- [ ] Checkpoint 15: `npm run build` 成功
-- [ ] Checkpoint 16: [CHANGELOG.md](file:///d:/G/github/signbridge/CHANGELOG.md) `[Unreleased]` 区段新增修复条目
-- [ ] Checkpoint 17: git commit 完成（不 push）
+- [x] Checkpoint 12: `npx tsc -b` exit 0
+- [x] Checkpoint 13: `npm run lint` 无新增 error
+- [x] Checkpoint 14: `npm run test` 全部通过（数量 ≥ 820）
+- [x] Checkpoint 15: `npm run build` 成功
+- [x] Checkpoint 16: [CHANGELOG.md](file:///d:/G/github/signbridge/CHANGELOG.md) `[Unreleased]` 区段新增修复条目
+- [x] Checkpoint 17: git commit 完成（不 push）

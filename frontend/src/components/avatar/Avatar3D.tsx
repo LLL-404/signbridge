@@ -70,15 +70,17 @@ function SkeletonAvatarModel({ pose }: { pose: BonePose }) {
   const blendRef = useRef(0);
 
   useEffect(() => {
-    if (groupRef.current) {
+    // 将 ref.current 复制到局部变量，cleanup 中使用局部变量避免 ref 已变化
+    const group = groupRef.current;
+    if (group) {
       const skelGroup = skeleton.getGroup();
-      groupRef.current.add(skelGroup);
+      group.add(skelGroup);
       skelGroup.position.y = -1.0;
       skeleton.applyPose(NEUTRAL_POSE);
     }
     return () => {
-      if (groupRef.current) {
-        groupRef.current.remove(skeleton.getGroup());
+      if (group) {
+        group.remove(skeleton.getGroup());
       }
     };
   }, [skeleton]);

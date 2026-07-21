@@ -20,4 +20,4 @@
 - [x] C3.3: 本地 `npx playwright test` 全部 E2E 测试通过
 - [x] C3.4: `CHANGELOG.md` [Unreleased] 区段有新增条目
 - [x] C3.5: git commit + push 成功
-- [ ] C3.6: CI 流水线 `app.spec.ts:33` 测试通过
+- [x] C3.6: CI 流水线 `app.spec.ts:33` 测试通过（Run ID 29821810265，5m8s 全绿）

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AvatarCanvas from '@/components/avatar/AvatarCanvas';
 import NonManualMarkerOverlay from '@/components/avatar/NonManualMarkerOverlay';
 import { useAvatarPlayer } from '@/hooks/useAvatarPlayer';
@@ -40,7 +40,8 @@ export function DemoMode() {
   const autoPlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scenario: DemoScenario | undefined = getScenario(selectedId);
-  const steps = scenario?.steps ?? [];
+  // 用 useMemo 包裹 steps，避免逻辑表达式每次渲染产生新引用导致下游 useCallback 反复重建
+  const steps = useMemo(() => scenario?.steps ?? [], [scenario]);
   const currentStepData: DemoStep | undefined = steps[currentStep];
 
   const playStep = useCallback(async (step: DemoStep) => {

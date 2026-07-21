@@ -51,10 +51,14 @@ export function DataCollectionPanel() {
     stop: stopTracking,
   } = useHandTracking({ width: 320, height: 240, mirror: true });
 
+  // 持有最新的 stopTracking 引用，避免将其加入 effect 依赖导致初始化 effect 反复执行
+  const stopTrackingRef = useRef(stopTracking);
+  stopTrackingRef.current = stopTracking;
+
   useEffect(() => {
     vocabularyStore.getAll().then((words) => setGlossary(words));
     refreshDatasetStats();
-    return () => { stopTracking(); runningRef.current = false; };
+    return () => { stopTrackingRef.current(); runningRef.current = false; };
   }, []);
 
   // 组件卸载时清理所有未完成的定时器，避免资源泄漏

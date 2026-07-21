@@ -52,7 +52,7 @@ async function loadRealVRM(): Promise<VRM> {
       '',
       (gltf) => {
         // VRMLoaderPlugin 将 VRM 实例存放在 gltf.userData.vrm
-        vrmInstance = (gltf as any).userData.vrm;
+        vrmInstance = gltf.userData.vrm as VRM;
         if (!vrmInstance) {
           reject(new Error('Failed to extract VRM from glTF'));
           return;

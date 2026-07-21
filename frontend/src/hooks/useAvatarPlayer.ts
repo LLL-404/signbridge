@@ -57,12 +57,13 @@ export function useAvatarPlayer(): UseAvatarPlayerReturn {
   // rAF 循环：每帧驱动 AvatarDriver 更新，节流同步姿态到 state
   useEffect(() => {
     mountedRef.current = true;
+    // 将 ref.current 复制到局部变量，cleanup 中使用局部变量避免 ref 已变化
+    const driver = driverRef.current;
     const loop = (): void => {
       const now = performance.now();
       const delta = now - lastTimeRef.current;
       lastTimeRef.current = now;
 
-      const driver = driverRef.current;
       // driver.update 始终以 60fps 推进，保证 VRM 动画与穿模检测时序正确
       driver.update(delta);
       // setPose 节流到 ~30fps：减少 React 重渲染频率
@@ -77,7 +78,7 @@ export function useAvatarPlayer(): UseAvatarPlayerReturn {
     return () => {
       mountedRef.current = false;
       cancelAnimationFrame(rafRef.current);
-      driverRef.current.stop();
+      driver.stop();
     };
   }, []);
 

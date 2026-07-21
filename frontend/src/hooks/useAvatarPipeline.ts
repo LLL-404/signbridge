@@ -45,6 +45,17 @@ export interface UseAvatarPipelineReturn {
  */
 export function useAvatarPipeline(): UseAvatarPipelineReturn {
   const player = useAvatarPlayer();
+  // 解构出稳定的方法/字段，便于在 useCallback 中精确声明依赖
+  const {
+    pose,
+    vrmPose,
+    isPlaying,
+    playGloss,
+    playSequence,
+    stop: playerStop,
+    setVRMAnimator,
+    setSpeed,
+  } = player;
 
   /** 待播队列 */
   const queueRef = useRef<GlossSequence[]>([]);
@@ -54,9 +65,9 @@ export function useAvatarPipeline(): UseAvatarPipelineReturn {
   const onQueueEmptyRef = useRef<(() => void) | null>(null);
   /** 播放下一个序列的函数引用（打破循环依赖） */
   const playNextRef = useRef<(seq: GlossSequence) => void>(() => {});
-  /** 持有最新的 player.playSequence 引用，避免闭包陈旧 */
-  const playerPlaySequenceRef = useRef(player.playSequence);
-  playerPlaySequenceRef.current = player.playSequence;
+  /** 持有最新的 playSequence 引用，避免闭包陈旧 */
+  const playerPlaySequenceRef = useRef(playSequence);
+  playerPlaySequenceRef.current = playSequence;
 
   // 播放下一个序列：递归消费队列，队空时触发 onQueueEmpty 回调
   playNextRef.current = (sequence: GlossSequence) => {
@@ -95,9 +106,9 @@ export function useAvatarPipeline(): UseAvatarPipelineReturn {
   /** VRM 加载完成回调：注入 AvatarDriver */
   const handleVRMLoaded = useCallback(
     (vrm: VRM, animator: VRMAnimator): void => {
-      player.setVRMAnimator(vrm, animator);
+      setVRMAnimator(vrm, animator);
     },
-    [player.setVRMAnimator],
+    [setVRMAnimator],
   );
 
   /** 停止播放并清空队列 */
@@ -105,8 +116,8 @@ export function useAvatarPipeline(): UseAvatarPipelineReturn {
     queueRef.current = [];
     isPlayingRef.current = false;
     onQueueEmptyRef.current = null;
-    player.stop();
-  }, [player.stop]);
+    playerStop();
+  }, [playerStop]);
 
   /** 清空待播队列（不影响正在播放的当前序列） */
   const clearQueue = useCallback((): void => {
@@ -117,13 +128,13 @@ export function useAvatarPipeline(): UseAvatarPipelineReturn {
   const hasQueued = useCallback((): boolean => queueRef.current.length > 0, []);
 
   return {
-    pose: player.pose,
-    vrmPose: player.vrmPose,
-    isPlaying: player.isPlaying,
-    playGloss: player.playGloss,
-    playSequence: player.playSequence,
+    pose,
+    vrmPose,
+    isPlaying,
+    playGloss,
+    playSequence,
     stop,
-    setSpeed: player.setSpeed,
+    setSpeed,
     clearQueue,
     handleVRMLoaded,
     playOrEnqueue,

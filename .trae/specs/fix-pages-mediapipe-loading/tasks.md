@@ -32,12 +32,15 @@
   - [x] SubTask 6.2: 更新 `CHANGELOG.md` 记录本次修复（fix: 类型）
 
 - [ ] Task 7: 端到端验证
-  - [ ] SubTask 7.1: 本地 tsc / lint / build 全部通过
-  - [ ] SubTask 7.2: commit 并 push 触发 GitHub Pages 部署
-  - [ ] SubTask 7.3: 等 Pages 部署完成，访问 `/signbridge/voice-to-sign` 确认 avatar 正常
-  - [ ] SubTask 7.4: 访问 `/signbridge/sign-to-text` 确认 wasm 加载成功、摄像头识别正常
-  - [ ] SubTask 7.5: 访问 `/signbridge/dialogue` 确认双向对话页正常
-  - [ ] SubTask 7.6: 访问 `/signbridge/learning` 确认学习页正常
+  > 注：需在 GitHub Pages 部署后手动验证 4 个页面（voice-to-sign/sign-to-text/dialogue/learning）功能正常，无法在本地自动验证
+  - [ ] SubTask 7.1: 本地 tsc 退出码 0，lint 0 errors（10 个预先存在 warnings），build 成功，dist/mediapipe/models/ 包含 3 个模型文件
+  - [ ] SubTask 7.2: commit 3044aeb 已 push，GitHub Pages 部署成功（Run ID 29850397128，conclusion: success）
+  - [ ] SubTask 7.3: 首页 200 OK，/voice-to-sign 通过 404.html SPA 重定向可达，静态资源完整
+  - [ ] SubTask 7.4: /sign-to-text 通过 SPA 重定向可达，vision_wasm_internal.wasm 部署完整（11,153,617 bytes），gesture_recognizer.task 完整（8,373,440 bytes）
+  - [ ] SubTask 7.5: /dialogue 通过 SPA 重定向可达
+  - [ ] SubTask 7.6: /learning 通过 SPA 重定向可达
+  - [ ] 静态资源验证：pose_landmarker_full.task（9,398,198 bytes）、hand_landmarker.task（7,819,105 bytes）、wasm 文件全部 200 OK 且完整
+  - [ ] CSP 验证：connect-src 'self' blob: data:;（外部 CDN 白名单已移除）
 
 # Task Dependencies
 

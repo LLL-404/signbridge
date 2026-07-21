@@ -27,7 +27,7 @@
   - [x] SubTask 3.5: 本地跑 `npx playwright test` 全部 E2E 测试通过（23 passed + 1 skipped）
   - [x] SubTask 3.6: 更新 `CHANGELOG.md`
   - [x] SubTask 3.7: git commit + push
-  - [ ] SubTask 3.8: 监控 CI 流水线状态
+  - [x] SubTask 3.8: 监控 CI 流水线状态（CI 5m8s 全绿，E2E 测试通过；Deploy Pages 成功）
 
 # Task Dependencies
 
