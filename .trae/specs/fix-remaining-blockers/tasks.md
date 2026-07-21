@@ -46,7 +46,7 @@
 - [x] Task 9: 更新 CHANGELOG 并提交
   - [x] SubTask 9.1: 在 `CHANGELOG.md` [Unreleased] 记录所有变更
   - [x] SubTask 9.2: git commit + push
-  - [ ] SubTask 9.3: 监控 CI 流水线状态，确认无 Node.js deprecated 警告且全绿
+  - [x] SubTask 9.3: 监控 CI 流水线状态，确认无 Node.js deprecated 警告且全绿（CI Run 29852154411 success, Deploy Pages 29852154385 success）
 
 # Task Dependencies
 

@@ -6,7 +6,7 @@
  *   - environment: jsdom —— 提供 DOM API（document/window），支持组件测试
  *   - globals: true —— 全局注入 describe/it/expect，无需手动 import
  *   - setupFiles: 测试启动脚本，可扩展 mock、polyfill
- *   - coverage: v8 引擎，阈值 50%（先建立基线，后续逐步提高）
+ *   - coverage: v8 引擎，阈值基于实际基线设定（statements/lines 57%，branches/functions 77%，留 5%+ 缓冲）
  *
  * 参考：https://vitest.dev/config/
  */
@@ -33,10 +33,10 @@ export default defineConfig({
       include: ['src/modules/**/*.ts'],
       exclude: ['src/modules/**/*.worker.ts', 'src/**/*.test.ts'],
       thresholds: {
-        statements: 50,
-        branches: 50,
-        functions: 50,
-        lines: 50,
+        statements: 57,
+        branches: 77,
+        functions: 77,
+        lines: 57,
       },
     },
   },

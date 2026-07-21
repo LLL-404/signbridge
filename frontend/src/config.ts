@@ -11,6 +11,8 @@
  *   VITE_MEDIAPIPE_WASM_BASE_URL   — MediaPipe tasks-vision wasm 目录
  *   VITE_MEDIAPIPE_HANDS_CDN_BASE  — MediaPipe Hands 旧版 wasm CDN 基址
  *   VITE_GESTURE_MODEL_URL         — 预训练手势识别模型 URL
+ *   VITE_POSE_MODEL_URL            — 姿态估计模型 URL（PoseEstimator 使用）
+ *   VITE_HAND_MODEL_URL            — 手部关键点模型 URL（PoseEstimator / STGCNRecognizer 使用）
  *   VITE_GESTURE_LIBRARY_URL       — 默认手势库 JSON 路径
  *   VITE_VOCABULARY_URL            — 词汇库 JSON 路径
  *   VITE_APP_NAME                  — 应用显示名称

@@ -106,7 +106,7 @@ export class Vec3OneEuroFilter {
 
 /**
  * 骨骼旋转平滑器：对每个关节维护独立的 One-Euro Filter
- * @deprecated 使用 QuaternionSmoother 代替
+ * 用于 Avatar3D skeleton 模式的骨骼旋转平滑（基于欧拉角分量 One-Euro Filter）
  */
 export class BoneSmoother {
   private filters: Map<string, Vec3OneEuroFilter> = new Map();
@@ -134,23 +134,6 @@ export class BoneSmoother {
       f.reset();
     }
   }
-}
-
-/**
- * 球面线性插值（SLERP）两个 Vec3 旋转
- * @deprecated 使用 slerpQuat 代替
- */
-export function slerpRotation(
-  a: { x: number; y: number; z: number },
-  b: { x: number; y: number; z: number },
-  t: number,
-): { x: number; y: number; z: number } {
-  // 简单线性插值（对欧拉角足够，因为帧间变化小）
-  return {
-    x: a.x + (b.x - a.x) * t,
-    y: a.y + (b.y - a.y) * t,
-    z: a.z + (b.z - a.z) * t,
-  };
 }
 
 /**

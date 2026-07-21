@@ -25,7 +25,7 @@ export interface HandPose {
 
 /**
  * 完整身体姿态（一帧）
- * @deprecated 旧骨骼姿态结构（17 自创关节名），将被 VRMPose 替代。
+ * 2D/skeleton 模式使用的姿态结构（17 自创关节名），与 VRMPose 并存。
  * 保留供双轨过渡期回退使用，新代码请用 VRMPose。
  */
 export interface BonePose {

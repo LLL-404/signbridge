@@ -29,4 +29,4 @@
 - [x] C4.4: `npm run build` 构建成功
 - [x] C4.5: `CHANGELOG.md` [Unreleased] 有新增条目（fix(lint)、chore(ci)、docs(spec)）
 - [x] C4.6: git commit + push 成功
-- [ ] C4.7: CI 流水线全绿，无 Node.js deprecated 警告
+- [x] C4.7: CI 流水线全绿，无 Node.js deprecated 警告（CI 29852154411 success, Deploy Pages 29852154385 success）
