@@ -30,22 +30,32 @@ export const appConfig = {
   /** 应用名称 */
   appName: env('VITE_APP_NAME', '手语桥 SignBridge'),
 
-  /** MediaPipe tasks-vision wasm 基址（用于 GestureRecognizer） */
+  /**
+   * MediaPipe tasks-vision wasm 基址（用于 GestureRecognizer / PoseLandmarker / HandLandmarker）
+   * 默认自托管于 public/mediapipe/tasks-vision/wasm，避免依赖外部 CDN
+   * 切换 CDN 时设置 VITE_MEDIAPIPE_WASM_BASE_URL 环境变量即可
+   */
   mediapipeWasmBaseUrl: env(
     'VITE_MEDIAPIPE_WASM_BASE_URL',
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm',
+    import.meta.env.BASE_URL + 'mediapipe/tasks-vision/wasm',
   ),
 
-  /** MediaPipe Hands 旧版 wasm CDN 基址（用于 HandTracker） */
+  /**
+   * MediaPipe Hands 旧版 wasm 基址（用于 HandTracker）
+   * 默认自托管于 public/mediapipe/hands，避免依赖外部 CDN
+   */
   mediapipeHandsCdnBase: env(
     'VITE_MEDIAPIPE_HANDS_CDN_BASE',
-    'https://cdn.jsdelivr.net/npm/@mediapipe/hands',
+    import.meta.env.BASE_URL + 'mediapipe/hands',
   ),
 
-  /** 预训练手势识别模型 URL */
+  /**
+   * 预训练手势识别模型 URL
+   * 默认自托管于 public/mediapipe/models/gesture_recognizer.task，避免依赖 Google Storage
+   */
   gestureModelUrl: env(
     'VITE_GESTURE_MODEL_URL',
-    'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task',
+    import.meta.env.BASE_URL + 'mediapipe/models/gesture_recognizer.task',
   ),
 
   /** 默认手势库 JSON 路径（基于 Vite BASE_URL 拼接，兼容子路径部署） */

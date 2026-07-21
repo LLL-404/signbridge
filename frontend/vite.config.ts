@@ -96,7 +96,15 @@ export default defineConfig({
         // 预缓存资源类型：仅核心静态资源，png/svg/wasm 由 runtimeCaching 按需拉取
         // 移除 wasm：tfjs-backend-webgl 的 wasm 文件较大且仅在识别功能激活时需要
         globPatterns: ['**/*.{js,css,html,ico,woff2}'],
-        globIgnores: ['**/data/vocabulary.json', '**/models/*.vrm', '**/pwa-*.png'],
+        globIgnores: [
+          '**/data/vocabulary.json',
+          '**/models/*.vrm',
+          '**/pwa-*.png',
+          // MediaPipe 自托管资源：wasm/task/data 大文件，不预缓存，按需拉取
+          '**/mediapipe/**/*.wasm',
+          '**/mediapipe/**/*.task',
+          '**/mediapipe/**/*.data',
+        ],
         // 单文件预缓存上限 2MB，避免大文件拖慢首次访问
         maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
         navigateFallback: process.env.GITHUB_PAGES ? '/signbridge/index.html' : '/index.html',
@@ -124,6 +132,16 @@ export default defineConfig({
             options: {
               cacheName: 'vrm-model-cache',
               expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // MediaPipe 自托管资源：wasm/task/data 大文件且版本固定，CacheFirst 离线优先
+            urlPattern: /\/mediapipe\/.*\.(?:wasm|task|data|js)$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'mediapipe-cache',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 30 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },
