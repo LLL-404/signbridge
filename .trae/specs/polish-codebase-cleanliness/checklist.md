@@ -22,6 +22,6 @@
 - [x] C13: `npm run build` 构建成功
 
 ## 提交
-- [ ] C14: `CHANGELOG.md` [Unreleased] 有新增条目
-- [ ] C15: git commit + push 成功
-- [ ] C16: CI 流水线全绿
+- [x] C14: `CHANGELOG.md` [Unreleased] 有新增条目
+- [x] C15: git commit + push 成功
+- [x] C16: CI 流水线全绿

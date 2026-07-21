@@ -25,10 +25,10 @@
   - [x] SubTask 5.3: `npm run test` 全部通过（820/820，test:coverage 已确认）
   - [x] SubTask 5.4: `npm run build` 构建成功（15.63s，2011 modules）
 
-- [ ] Task 6: 更新 CHANGELOG 并提交
-  - [ ] SubTask 6.1: 在 `CHANGELOG.md` [Unreleased] 记录变更（chore(cleanup): @deprecated 残留清理 + config 注释同步 + coverage 阈值调整）
-  - [ ] SubTask 6.2: git commit + push
-  - [ ] SubTask 6.3: 监控 CI 流水线全绿
+- [x] Task 6: 更新 CHANGELOG 并提交
+  - [x] SubTask 6.1: 在 `CHANGELOG.md` [Unreleased] 记录变更（chore(cleanup): @deprecated 残留清理 + config 注释同步 + coverage 阈值调整）
+  - [x] SubTask 6.2: git commit + push（commit 1d5d992 已推送）
+  - [x] SubTask 6.3: 监控 CI 流水线全绿（CI Run 29855299063 success 4m23s, Deploy Pages 29855299146 success 1m22s）
 
 # Task Dependencies
 
