@@ -136,13 +136,15 @@ export default defineConfig({
             },
           },
           {
-            // MediaPipe 自托管资源：wasm/task/data 大文件且版本固定，CacheFirst 离线优先
+            // MediaPipe 自托管资源：wasm/task/data 大文件
+            // NetworkFirst 优先从网络获取完整版本，避免缓存截断文件；超时 30s 后回退缓存
             urlPattern: /\/mediapipe\/.*\.(?:wasm|task|data|js)$/i,
-            handler: 'CacheFirst',
+            handler: 'NetworkFirst',
             options: {
               cacheName: 'mediapipe-cache',
               expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 30 },
               cacheableResponse: { statuses: [0, 200] },
+              networkTimeoutSeconds: 30,
             },
           },
           {

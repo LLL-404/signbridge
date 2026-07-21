@@ -66,13 +66,11 @@ const CONFIDENCE_THRESHOLD = 0.5;
 /** WASM 文件集 URL（从 appConfig 读取） */
 const WASM_URL = appConfig.mediapipeWasmBaseUrl;
 
-/** Pose 模型 URL（appConfig 未配置，使用默认 CDN） */
-const POSE_MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
+/** Pose 模型 URL（从 appConfig 读取，默认自托管） */
+const POSE_MODEL_URL = appConfig.poseModelUrl;
 
-/** Hand 模型 URL（appConfig 未配置，使用默认 CDN） */
-const HAND_MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+/** Hand 模型 URL（从 appConfig 读取，默认自托管） */
+const HAND_MODEL_URL = appConfig.handModelUrl;
 
 // ===== 共享辅助函数（供 Worker 复用） =====
 

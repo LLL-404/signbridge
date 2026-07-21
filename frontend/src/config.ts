@@ -58,6 +58,24 @@ export const appConfig = {
     import.meta.env.BASE_URL + 'mediapipe/models/gesture_recognizer.task',
   ),
 
+  /**
+   * 姿态估计模型 URL
+   * 默认自托管于 public/mediapipe/models/pose_landmarker_full.task，避免依赖 Google Storage
+   */
+  poseModelUrl: env(
+    'VITE_POSE_MODEL_URL',
+    import.meta.env.BASE_URL + 'mediapipe/models/pose_landmarker_full.task',
+  ),
+
+  /**
+   * 手部关键点模型 URL
+   * 默认自托管于 public/mediapipe/models/hand_landmarker.task，避免依赖 Google Storage
+   */
+  handModelUrl: env(
+    'VITE_HAND_MODEL_URL',
+    import.meta.env.BASE_URL + 'mediapipe/models/hand_landmarker.task',
+  ),
+
   /** 默认手势库 JSON 路径（基于 Vite BASE_URL 拼接，兼容子路径部署） */
   gestureLibraryUrl: env('VITE_GESTURE_LIBRARY_URL', import.meta.env.BASE_URL + 'gestures.json'),
 

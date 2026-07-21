@@ -40,9 +40,8 @@ const log = logger.module('STGCNRecognizer');
 
 /** MediaPipe wasm CDN（复用 RuleRecognizer 配置） */
 const WASM_URL = appConfig.mediapipeWasmBaseUrl;
-/** HandLandmarker 模型 URL */
-const HAND_MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+/** HandLandmarker 模型 URL（从 appConfig 读取，默认自托管） */
+const HAND_MODEL_URL = appConfig.handModelUrl;
 /** 推理置信度阈值：低于此值视为无效识别 */
 export const STGCN_CONFIDENCE_THRESHOLD = 0.8;
 
