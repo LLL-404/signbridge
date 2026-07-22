@@ -21,5 +21,5 @@
 
 ## 提交
 - [x] C12: `CHANGELOG.md` [Unreleased] 有新增条目
-- [ ] C13: git commit + push 成功
-- [ ] C14: CI 流水线全绿
+- [x] C13: git commit + push 成功（commit e204069）
+- [x] C14: CI 流水线全绿（CI 29878794665 + Deploy Pages 29878794663）

@@ -21,10 +21,10 @@
   - [x] SubTask 4.3: `npm run test` 全部通过（821 passed）
   - [x] SubTask 4.4: `npm run build` 构建成功
 
-- [ ] Task 5: 更新 CHANGELOG 并提交
+- [x] Task 5: 更新 CHANGELOG 并提交
   - [x] SubTask 5.1: 在 `CHANGELOG.md` [Unreleased] 记录变更（fix(avatar): 肘部穿透修正——上臂旋转同步重算）
-  - [ ] SubTask 5.2: git commit + push
-  - [ ] SubTask 5.3: 监控 CI 流水线全绿
+  - [x] SubTask 5.2: git commit + push 成功（commit e204069）
+  - [x] SubTask 5.3: 监控 CI 流水线全绿（CI 29878794665 + Deploy Pages 29878794663 均 success）
 
 # Task Dependencies
 
